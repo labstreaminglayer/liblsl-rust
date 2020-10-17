@@ -1,9 +1,17 @@
 [package]
 name = "lsl"
 version = "0.1.0"
-authors = ["Christian Kothe <christiankothe@gmail.com>"]
+authors = ["Intheon <contact@intheon.io>", "Christian Kothe <christian.kothe@intheon.io>"]
 edition = "2018"
+description = "Lab streaming layer (liblsl) bindings for rust."
+repository = "https://github.com/intheon/liblsl-rust/"
+license = "MIT"
+keywords = ["ffi", "bindings", "streaming", "protocol", "lsl"]
+categories = ["api-bindings", "network-programming"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = ["lsl-sys"]
 
 [dependencies]
+lsl-sys = { version = "0.1.0", path = "lsl-sys" }
+
