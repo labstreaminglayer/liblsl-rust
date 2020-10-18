@@ -1,8 +1,9 @@
+use std::env;
+
 
 fn main() {
    // TODO: find out if liblsl already present on system and usable (if so, link to that instead)
-   println!("cargo:rerun-if-changed=build.rs");
-
+   // println!("cargo:warning={}", "rebuilding...");
    build_liblsl();
 }
 
@@ -22,4 +23,12 @@ fn build_liblsl() {
    // emit link directives to cargo
    println!("cargo:rustc-link-search=native={}", libdir.to_str().unwrap());
    println!("cargo:rustc-link-lib=static={}", libname);
+
+   // make sure we also link the C++ stdlib (using its platform-specific name)
+   let target  = env::var("TARGET").unwrap();
+   if target.contains("linux") {
+      println!("cargo:rustc-link-lib=dylib=stdc++");
+   } else {
+      println!("cargo:rustc-link-lib=dylib=c++");
+   }
 }
