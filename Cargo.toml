@@ -6,7 +6,7 @@ edition = "2018"
 description = "Lab streaming layer (liblsl) bindings for rust."
 repository = "https://github.com/intheon/liblsl-rust/"
 license = "MIT"
-keywords = ["ffi", "bindings", "streaming", "protocol", "lsl"]
+keywords = ["lsl", "streaming", "protocol", "ffi", "bindings"]
 categories = ["api-bindings", "network-programming"]
 
 [workspace]

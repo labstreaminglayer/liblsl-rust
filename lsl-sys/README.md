@@ -21,7 +21,7 @@ Then, run the following commands to regenerate the bindings:
 ```
 cd lsl-sys
 
-# (prefix with original license text)
+# (prefix with liblsl license text)
 echo "/* $(cat liblsl/LICENSE) */" > src/generated.rs
 
 # (append bindings to file)

@@ -5,8 +5,12 @@ pub use generated::*;
 
 #[cfg(test)]
 mod tests {
+    use crate::lsl_local_clock;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_properly_linked() {
+        unsafe {
+            lsl_local_clock();
+        }
     }
 }
