@@ -14,6 +14,8 @@ This module links to the [liblsl](https://github.com/sccn/liblsl) library via th
 */
 
 use lsl_sys::*;
+use std::ffi::CStr;
+
 
 /// Constant to indicate that a stream has variable sampling rate.
 pub const IRREGULAR_RATE: f64 = 0.0;
@@ -63,7 +65,6 @@ pub enum ChannelFormat {
 }
 
 
-
 /// Post-processing options for stream inlets.
 ///#[derive(Copy, Clone, Debug)]
 pub enum ProcessingOptions {
@@ -86,6 +87,41 @@ pub enum ProcessingOptions {
     /// The combination of all possible post-processing options.
     ALL = 1|2|4|8
 }
+
+
+/** Protocol version.
+The major version is protocol_version() / 100;
+The minor version is protocol_version() % 100;
+Clients with different minor versions are protocol-compatible with each other
+while clients with different major versions will refuse to work together.
+*/
+pub fn protocol_version() -> i32 {
+    unsafe {
+        lsl_protocol_version()
+    }
+}
+
+/** Version of the liblsl library.
+* The major version is library_version() / 100;
+* The minor version is library_version() % 100;
+*/
+pub fn library_version() -> i32 {
+    unsafe {
+        lsl_library_version()
+    }
+}
+
+
+/** Get a string containing library information. The format of the string shouldn't be used
+for anything important except giving a a debugging person a good idea which exact library
+version is used. */
+pub fn library_info() -> &'static str {
+    unsafe {
+        CStr::from_ptr(lsl_library_info()).to_str().unwrap()
+    }
+}
+
+
 
 
 /**
