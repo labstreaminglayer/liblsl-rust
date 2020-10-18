@@ -115,13 +115,11 @@ pub fn library_version() -> i32 {
 /** Get a string containing library information. The format of the string shouldn't be used
 for anything important except giving a a debugging person a good idea which exact library
 version is used. */
-pub fn library_info() -> &'static str {
+pub fn library_info() -> String {
     unsafe {
-        CStr::from_ptr(lsl_library_info()).to_str().unwrap()
+        CStr::from_ptr(lsl_library_info()).to_string_lossy().into_owned()
     }
 }
-
-
 
 
 /**
