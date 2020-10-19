@@ -18,6 +18,8 @@ via the low-level `lsl-sys` crate.
 
 use lsl_sys::*;
 use std::ffi;
+use std::convert::TryFrom;
+
 mod utils;  // TODO: we can prob remove this
 
 /// Constant to indicate that a stream has variable sampling rate.
@@ -687,29 +689,32 @@ impl ExPushable<std::vec::Vec<i64>> for StreamOutlet {
     }
 }
 
-// TODO: use lsl_push_sample_butp here and require no zero-termination
-//       this saves us all the allocation work on the Rust side
 impl ExPushable<std::vec::Vec<String>> for StreamOutlet {
     fn push_sample_ex(&self, data: &std::vec::Vec<String>, timestamp: f64, pushthrough: bool) {
         self.assert_len(data.len());
+        let ptrs: Vec<_> = data.iter().map(|x| {x.as_ptr()}).collect();
+        let lens: Vec<_> = data.iter().map(|x| {u32::try_from(x.len()).unwrap()}).collect();
         unsafe {
-            let c_strings: Vec<_> = data.iter().map(|x| {ffi::CString::new(x.as_str()).unwrap()}).collect();
-            let c_ptrs: Vec<_> = c_strings.iter().map(|x| {x.as_ptr()}).collect();
-            let c_arr = c_ptrs.as_ptr() as *mut *const std::os::raw::c_char;
-            lsl_push_sample_strtp(self.handle,c_arr, timestamp, pushthrough as i32);
+            lsl_push_sample_buftp(self.handle,
+                                  ptrs.as_ptr() as *mut *const std::os::raw::c_char,
+                                  lens.as_ptr(),
+                                  timestamp,
+                                  pushthrough as i32);
         }
     }
 }
 
-// TODO: see above
 impl ExPushable<std::vec::Vec<&str>> for StreamOutlet {
     fn push_sample_ex(&self, data: &std::vec::Vec<&str>, timestamp: f64, pushthrough: bool) {
         self.assert_len(data.len());
+        let ptrs: Vec<_> = data.iter().map(|x| {x.as_ptr()}).collect();
+        let lens: Vec<_> = data.iter().map(|x| {u32::try_from(x.len()).unwrap()}).collect();
         unsafe {
-            let c_strings: Vec<_> = data.iter().map(|x| {ffi::CString::new(*x).unwrap()}).collect();
-            let c_ptrs: Vec<_> = c_strings.iter().map(|x| {x.as_ptr()}).collect();
-            let c_arr = c_ptrs.as_ptr() as *mut *const std::os::raw::c_char;
-            lsl_push_sample_strtp(self.handle,c_arr, timestamp, pushthrough as i32);
+            lsl_push_sample_buftp(self.handle,
+                                  ptrs.as_ptr() as *mut *const std::os::raw::c_char,
+                                  lens.as_ptr(),
+                                  timestamp,
+                                  pushthrough as i32);
         }
     }
 }
