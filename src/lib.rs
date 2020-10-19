@@ -69,40 +69,6 @@ pub enum ChannelFormat {
     Undefined = 0,
 }
 
-// internal implementation for channel format
-impl ChannelFormat {
-    // Convert to corresponding low-level data type
-    fn to_ffi(&self) -> lsl_channel_format_t {
-        match self {
-            ChannelFormat::Float32 => lsl_channel_format_t_cft_float32,
-            ChannelFormat::Double64 => lsl_channel_format_t_cft_double64,
-            ChannelFormat::String => lsl_channel_format_t_cft_string,
-            ChannelFormat::Int32 => lsl_channel_format_t_cft_int32,
-            ChannelFormat::Int16 => lsl_channel_format_t_cft_int16,
-            ChannelFormat::Int8 => lsl_channel_format_t_cft_int8,
-            ChannelFormat::Int64 => lsl_channel_format_t_cft_int64,
-            ChannelFormat::Undefined => lsl_channel_format_t_cft_undefined,
-        }
-    }
-
-    // Convert from the corresponding low-level data type
-    fn from_ffi(fmt: lsl_channel_format_t) -> ChannelFormat {
-        #[allow(non_upper_case_globals)]
-        match fmt {
-            lsl_channel_format_t_cft_float32 => ChannelFormat::Float32,
-            lsl_channel_format_t_cft_double64 => ChannelFormat::Double64,
-            lsl_channel_format_t_cft_string => ChannelFormat::String,
-            lsl_channel_format_t_cft_int32 => ChannelFormat::Int32,
-            lsl_channel_format_t_cft_int16 => ChannelFormat::Int16,
-            lsl_channel_format_t_cft_int8 => ChannelFormat::Int8,
-            lsl_channel_format_t_cft_int64 => ChannelFormat::Int64,
-            // Note that this will convert any unknown values that come ouf of the lib into Undefined
-            _ => ChannelFormat::Undefined
-        }
-    }
-}
-
-
 /// Post-processing options for stream inlets.
 #[derive(Copy, Clone, Debug)]
 pub enum ProcessingOptions {
@@ -252,7 +218,7 @@ impl StreamInfo {
                 stream_type.as_ptr(),
                 channel_count,
                 nominal_srate,
-                channel_format.to_ffi(),
+                channel_format.to_native(),
                 source_id.as_ptr()
             );
             match handle.is_null() {
@@ -329,7 +295,7 @@ impl StreamInfo {
     */
     pub fn channel_format(&self) -> ChannelFormat {
         unsafe {
-            ChannelFormat::from_ffi(lsl_get_channel_format(self.handle))
+            ChannelFormat::from_native(lsl_get_channel_format(self.handle))
         }
     }
 
@@ -465,16 +431,16 @@ impl StreamInfo {
     }
 
     /// Get the native implementation handle.
-    pub fn native_handle(&self) -> lsl_streaminfo {
+    pub fn handle(&self) -> lsl_streaminfo {
         self.handle
     }
 
-    /// Construct a blank `StreamInfo`
+    /// Construct a blank `StreamInfo`.
     pub fn blank() -> StreamInfo {
         StreamInfo::new("untitled", "", 0, 0.0, ChannelFormat::Undefined, "").unwrap()
     }
 
-    /// Utility function to create a `StreamInfo` from an XML string
+    /// Create a `StreamInfo` from an XML string.
     pub fn from_xml(xml: &str) -> Result<StreamInfo, &'static str> {
         unsafe {
             let xml = match ffi::CString::new(xml) {
@@ -487,6 +453,14 @@ impl StreamInfo {
                 true => Err("Failed to create StreamInfo from XML.")
             }
         }
+    }
+
+    /// Create a `StreamInfo` from a native handle.
+    pub fn from_handle(handle: lsl_streaminfo) -> StreamInfo {
+        if handle.is_null() {
+            panic!("Attempted to create a `StreamInfo` from a NULL handle.")
+        }
+        StreamInfo { handle }
     }
 }
 
@@ -509,6 +483,131 @@ impl Clone for StreamInfo {
                 panic!("Failed to clone underlying lsl_streaminfo object.")
             }
             StreamInfo { handle }
+        }
+    }
+}
+
+
+// =======================
+// ==== Stream Outlet ====
+// =======================
+
+/**
+A stream outlet.
+Outlets are used to make streaming data (and the meta-data) available on the lab network.
+*/
+pub struct StreamOutlet {
+    handle: lsl_outlet,
+    channel_count: i32,
+}
+
+
+impl StreamOutlet {
+    /**
+    Establish a new stream outlet. This makes the stream discoverable.
+
+    Arguments:
+    * `info`: The stream information to use for creating this stream. Stays constant over the
+       lifetime of the outlet.
+    * `chunk_size`: The desired chunk granularity (in samples) for transmission.
+       If specified as 0, each push operation yields one chunk. Inlets can override this setting.
+    * `max_buffered`: The maximum amount of data to buffer (in seconds if there is a
+       nominal sampling rate, otherwise x100 in samples).  good default is 360, which corresponds
+       to 6 minutes of data. Note that, for high-bandwidth data you should consider using a lower
+       value here to avoid running out of RAM.
+    */
+    pub fn new(info: &StreamInfo, chunk_size: i32, max_buffered: i32) -> Result<StreamOutlet, &'static str> {
+        unsafe {
+            let handle = lsl_create_outlet(info.handle(), chunk_size, max_buffered);
+            let channel_count = info.channel_count();
+            match handle.is_null() {
+                false => Ok(StreamOutlet { handle, channel_count }),
+                true => Err("Could not create outlet from provided StreamInfo."),
+            }
+        }
+    }
+
+    // TODO: add push_*** functions here
+
+    // ===============================
+    // === Miscellaneous Functions ===
+    // ===============================
+
+    /**
+    Check whether consumers are currently registered.
+    While it does not hurt, there is technically no reason to push samples if there is no consumer.
+    */
+    pub fn have_consumers(&self) -> bool {
+        unsafe {
+            lsl_have_consumers(self.handle) != 0
+        }
+    }
+
+    /**
+    Wait until some consumer shows up (without wasting resources).
+    Returns True if the wait was successful, false if the timeout expired.
+    */
+    pub fn wait_for_consumers(&self, timeout: f64) -> bool {
+        unsafe {
+            lsl_wait_for_consumers(self.handle, timeout) != 0
+        }
+    }
+
+    /**
+    Retrieve the stream info provided by this outlet.
+    This is what was used to create the stream (and also has the Additional Network Information
+    fields assigned).
+    */
+    pub fn info(&self) -> Result<StreamInfo, &'static str> {
+        unsafe {
+            let info_handle = lsl_get_info(self.handle);
+            match info_handle.is_null() {
+                false => Ok(StreamInfo::from_handle(info_handle)),
+                true => Err("Could not obtain stream info for this outlet.")
+            }
+        }
+    }
+}
+
+
+impl Drop for StreamOutlet {
+    fn drop(&mut self) {
+        unsafe {
+            lsl_destroy_outlet(self.handle);
+        }
+    }
+}
+
+
+// helper functions for interop with native data types in the lsl_sys module
+impl ChannelFormat {
+    /// Convert to corresponding native data type.
+    pub fn to_native(&self) -> lsl_channel_format_t {
+        match self {
+            ChannelFormat::Float32 => lsl_channel_format_t_cft_float32,
+            ChannelFormat::Double64 => lsl_channel_format_t_cft_double64,
+            ChannelFormat::String => lsl_channel_format_t_cft_string,
+            ChannelFormat::Int32 => lsl_channel_format_t_cft_int32,
+            ChannelFormat::Int16 => lsl_channel_format_t_cft_int16,
+            ChannelFormat::Int8 => lsl_channel_format_t_cft_int8,
+            ChannelFormat::Int64 => lsl_channel_format_t_cft_int64,
+            ChannelFormat::Undefined => lsl_channel_format_t_cft_undefined,
+        }
+    }
+
+    /// Convert from the corresponding native data type.
+    pub fn from_native(fmt: lsl_channel_format_t) -> ChannelFormat {
+        #[allow(non_upper_case_globals)]
+        match fmt {
+            lsl_channel_format_t_cft_float32 => ChannelFormat::Float32,
+            lsl_channel_format_t_cft_double64 => ChannelFormat::Double64,
+            lsl_channel_format_t_cft_string => ChannelFormat::String,
+            lsl_channel_format_t_cft_int32 => ChannelFormat::Int32,
+            lsl_channel_format_t_cft_int16 => ChannelFormat::Int16,
+            lsl_channel_format_t_cft_int8 => ChannelFormat::Int8,
+            lsl_channel_format_t_cft_int64 => ChannelFormat::Int64,
+            // Note that this will convert any unknown values that come ouf of the lib into Undefined
+            _ => ChannelFormat::Undefined
         }
     }
 }

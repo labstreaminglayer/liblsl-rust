@@ -32,7 +32,7 @@ fn main() {
     println!("\nThe stream's miscellaneous info is:");
     println!("  channel_bytes = {}", info.channel_bytes());
     println!("  sample_bytes = {}", info.sample_bytes());
-    println!("  native_handle = {:?}", info.native_handle());
+    println!("  native_handle = {:?}", info.handle());
 
     println!();
 }
