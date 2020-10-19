@@ -10,74 +10,65 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 pub type __int16_t = ::std::os::raw::c_short;
 pub type __int32_t = ::std::os::raw::c_int;
 pub type __uint32_t = ::std::os::raw::c_uint;
-#[repr(u32)]
+#[doc = " For up to 24-bit precision measurements in the appropriate physical unit (e.g., microvolts)."]
+#[doc = " Integers from -16777216 to 16777216 are represented accurately."]
+pub const lsl_channel_format_t_cft_float32: lsl_channel_format_t = 1;
+#[doc = " For universal numeric data as long as permitted by network & disk budget."]
+#[doc = " The largest representable integer is 53-bit."]
+pub const lsl_channel_format_t_cft_double64: lsl_channel_format_t = 2;
+#[doc = " For variable-length ASCII strings or data blobs, such as video frames, complex event"]
+#[doc = "descriptions, etc."]
+pub const lsl_channel_format_t_cft_string: lsl_channel_format_t = 3;
+#[doc = " For high-rate digitized formats that require 32-bit precision."]
+#[doc = " Depends critically on meta-data to represent meaningful units."]
+#[doc = " Useful for application event codes or other coded data."]
+pub const lsl_channel_format_t_cft_int32: lsl_channel_format_t = 4;
+#[doc = " For very high rate signals (40Khz+) or consumer-grade audio."]
+#[doc = " For professional audio float is recommended."]
+pub const lsl_channel_format_t_cft_int16: lsl_channel_format_t = 5;
+#[doc = " For binary signals or other coded data. Not recommended for encoding string data."]
+pub const lsl_channel_format_t_cft_int8: lsl_channel_format_t = 6;
+#[doc = " For now only for future compatibility. Support for this type is not yet"]
+#[doc = "exposed in all languages. Also, some builds of liblsl will not be able"]
+#[doc = "to send or receive data of this type."]
+pub const lsl_channel_format_t_cft_int64: lsl_channel_format_t = 7;
+#[doc = "! Can not be transmitted."]
+pub const lsl_channel_format_t_cft_undefined: lsl_channel_format_t = 0;
 #[doc = "! Data format of a channel (each transmitted sample holds an array of channels)."]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum lsl_channel_format_t {
-    #[doc = " For up to 24-bit precision measurements in the appropriate physical unit (e.g., microvolts)."]
-    #[doc = " Integers from -16777216 to 16777216 are represented accurately."]
-    cft_float32 = 1,
-    #[doc = " For universal numeric data as long as permitted by network & disk budget."]
-    #[doc = " The largest representable integer is 53-bit."]
-    cft_double64 = 2,
-    #[doc = " For variable-length ASCII strings or data blobs, such as video frames, complex event"]
-    #[doc = "descriptions, etc."]
-    cft_string = 3,
-    #[doc = " For high-rate digitized formats that require 32-bit precision."]
-    #[doc = " Depends critically on meta-data to represent meaningful units."]
-    #[doc = " Useful for application event codes or other coded data."]
-    cft_int32 = 4,
-    #[doc = " For very high rate signals (40Khz+) or consumer-grade audio."]
-    #[doc = " For professional audio float is recommended."]
-    cft_int16 = 5,
-    #[doc = " For binary signals or other coded data. Not recommended for encoding string data."]
-    cft_int8 = 6,
-    #[doc = " For now only for future compatibility. Support for this type is not yet"]
-    #[doc = "exposed in all languages. Also, some builds of liblsl will not be able"]
-    #[doc = "to send or receive data of this type."]
-    cft_int64 = 7,
-    #[doc = "! Can not be transmitted."]
-    cft_undefined = 0,
-}
-#[repr(u32)]
+pub type lsl_channel_format_t = ::std::os::raw::c_uint;
+#[doc = " No automatic post-processing; return the ground-truth time stamps for manual"]
+#[doc = " post-processing. This is the default behavior of the inlet."]
+pub const lsl_processing_options_t_proc_none: lsl_processing_options_t = 0;
+#[doc = " Perform automatic clock synchronization;"]
+#[doc = " equivalent to manually adding the time_correction() value to the received time stamps."]
+pub const lsl_processing_options_t_proc_clocksync: lsl_processing_options_t = 1;
+#[doc = " Remove jitter from time stamps.<br>"]
+#[doc = " This will apply a smoothing algorithm to the received time stamps;"]
+#[doc = " the smoothing needs to see a minimum number of samples (30-120 seconds worst-case)"]
+#[doc = " until the remaining jitter is consistently below 1ms."]
+pub const lsl_processing_options_t_proc_dejitter: lsl_processing_options_t = 2;
+#[doc = " Force the time-stamps to be monotonically ascending.<br>"]
+#[doc = " Only makes sense if timestamps are dejittered."]
+pub const lsl_processing_options_t_proc_monotonize: lsl_processing_options_t = 4;
+#[doc = " Post-processing is thread-safe (same inlet can be read from by multiple threads);"]
+#[doc = " uses somewhat more CPU."]
+pub const lsl_processing_options_t_proc_threadsafe: lsl_processing_options_t = 8;
+#[doc = "! The combination of all possible post-processing options."]
+pub const lsl_processing_options_t_proc_ALL: lsl_processing_options_t = 15;
 #[doc = "! Post-processing options for stream inlets."]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum lsl_processing_options_t {
-    #[doc = " No automatic post-processing; return the ground-truth time stamps for manual"]
-    #[doc = " post-processing. This is the default behavior of the inlet."]
-    proc_none = 0,
-    #[doc = " Perform automatic clock synchronization;"]
-    #[doc = " equivalent to manually adding the time_correction() value to the received time stamps."]
-    proc_clocksync = 1,
-    #[doc = " Remove jitter from time stamps.<br>"]
-    #[doc = " This will apply a smoothing algorithm to the received time stamps;"]
-    #[doc = " the smoothing needs to see a minimum number of samples (30-120 seconds worst-case)"]
-    #[doc = " until the remaining jitter is consistently below 1ms."]
-    proc_dejitter = 2,
-    #[doc = " Force the time-stamps to be monotonically ascending.<br>"]
-    #[doc = " Only makes sense if timestamps are dejittered."]
-    proc_monotonize = 4,
-    #[doc = " Post-processing is thread-safe (same inlet can be read from by multiple threads);"]
-    #[doc = " uses somewhat more CPU."]
-    proc_threadsafe = 8,
-    #[doc = "! The combination of all possible post-processing options."]
-    proc_ALL = 15,
-}
-#[repr(i32)]
+pub type lsl_processing_options_t = ::std::os::raw::c_uint;
+#[doc = "! No error occurred"]
+pub const lsl_error_code_t_lsl_no_error: lsl_error_code_t = 0;
+#[doc = "! The operation failed due to a timeout."]
+pub const lsl_error_code_t_lsl_timeout_error: lsl_error_code_t = -1;
+#[doc = "! The stream has been lost."]
+pub const lsl_error_code_t_lsl_lost_error: lsl_error_code_t = -2;
+#[doc = "! An argument was incorrectly specified (e.g., wrong format or wrong length)."]
+pub const lsl_error_code_t_lsl_argument_error: lsl_error_code_t = -3;
+#[doc = "! Some other internal error has happened."]
+pub const lsl_error_code_t_lsl_internal_error: lsl_error_code_t = -4;
 #[doc = " Possible error codes."]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum lsl_error_code_t {
-    #[doc = "! No error occurred"]
-    lsl_no_error = 0,
-    #[doc = "! The operation failed due to a timeout."]
-    lsl_timeout_error = -1,
-    #[doc = "! The stream has been lost."]
-    lsl_lost_error = -2,
-    #[doc = "! An argument was incorrectly specified (e.g., wrong format or wrong length)."]
-    lsl_argument_error = -3,
-    #[doc = "! Some other internal error has happened."]
-    lsl_internal_error = -4,
-}
+pub type lsl_error_code_t = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct lsl_streaminfo_struct_ {

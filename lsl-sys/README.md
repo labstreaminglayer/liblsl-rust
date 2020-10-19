@@ -25,8 +25,10 @@ cd lsl-sys
 echo "/* $(cat liblsl/LICENSE) */" > src/generated.rs
 
 # (append bindings to file)
-bindgen liblsl/include/lsl_c.h --whitelist-function "^lsl_.*" --whitelist-var "^lsl_.*" --whitelist-type "^lsl_.*" \
-    --rustified-enum "lsl_channel_format_t" --rustified-enum "lsl_error_code_t" --rustified-enum "lsl_processing_options_t" \
+bindgen liblsl/include/lsl_c.h \
+    --whitelist-function "^lsl_.*" \
+    --whitelist-var "^lsl_.*" \
+    --whitelist-type "^lsl_.*" \
     >> src/generated.rs
 
 ```
