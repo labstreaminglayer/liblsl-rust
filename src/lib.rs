@@ -18,7 +18,7 @@ via the low-level `lsl-sys` crate.
 
 use lsl_sys::*;
 use std::ffi;
-mod utils;
+mod utils;  // TODO: we can prob remove this
 
 /// Constant to indicate that a stream has variable sampling rate.
 pub const IRREGULAR_RATE: f64 = 0.0;
@@ -497,8 +497,10 @@ A stream outlet.
 Outlets are used to make streaming data (and the meta-data) available on the lab network.
 */
 pub struct StreamOutlet {
+    // internal fields used by the Rust wrapper
     handle: lsl_outlet,
-    channel_count: i32,
+    channel_count: usize,
+    nominal_rate: f64,
 }
 
 
@@ -519,15 +521,14 @@ impl StreamOutlet {
     pub fn new(info: &StreamInfo, chunk_size: i32, max_buffered: i32) -> Result<StreamOutlet, &'static str> {
         unsafe {
             let handle = lsl_create_outlet(info.handle(), chunk_size, max_buffered);
-            let channel_count = info.channel_count();
+            let channel_count = info.channel_count() as usize;
+            let nominal_rate = info.nominal_srate();
             match handle.is_null() {
-                false => Ok(StreamOutlet { handle, channel_count }),
+                false => Ok(StreamOutlet { handle, channel_count, nominal_rate }),
                 true => Err("Could not create outlet from provided StreamInfo."),
             }
         }
     }
-
-    // TODO: add push_*** functions here
 
     // ===============================
     // === Miscellaneous Functions ===
@@ -566,6 +567,171 @@ impl StreamOutlet {
                 true => Err("Could not obtain stream info for this outlet.")
             }
         }
+    }
+
+    // Utility function that checks whether a given length value matches the channel count
+    fn assert_len(&self, len: usize) {
+        assert_eq!(len, self.channel_count, "StreamOutlet received data whose length {} does not \
+                   match the outlet's channel count {}", len, self.channel_count);
+    }
+}
+
+/// Exposes a sampling rate via the property nominal_srate()
+pub trait HasNominalRate {
+    fn nominal_srate(&self) -> f64;
+}
+
+impl HasNominalRate for StreamOutlet {
+    fn nominal_srate(&self) -> f64 {
+        self.nominal_rate
+    }
+}
+
+/**
+A trait that enables the methods push_*_ex<T>() for different values of T that are understood by
+LSL (i32, f64, str, etc.) on some object. This is implemented by StreamOutlet.
+*/
+pub trait ExPushable<T>: HasNominalRate {
+
+    fn push_sample_ex(&self, data: &T, timestamp: f64, pushthrough: bool);
+
+    fn push_chunk_ex(&self, samples: &std::vec::Vec<T>, timestamp: f64, pushthrough: bool) {
+        if !samples.is_empty() {
+            let mut timestamp = if timestamp == 0.0 { local_clock() } else { timestamp };
+            let srate = self.nominal_srate();
+            let max_k = samples.len() - 1;
+            // push first sample with calulated timestamp
+            if srate != IRREGULAR_RATE {
+                timestamp -= (max_k as f64) / srate;
+            }
+            self.push_sample_ex(&samples[0], timestamp,
+                                pushthrough && (samples.len() == 1));
+            // push successive samples with deduced stamp
+            for k in 1..=max_k {
+                self.push_sample_ex(&samples[k], DEDUCED_TIMESTAMP,
+                                    pushthrough && (k == max_k));
+            }
+        }
+    }
+
+    fn push_chunk_stamped_ex(&self, samples: &std::vec::Vec<T>, timestamps: &std::vec::Vec<f64>, pushthrough: bool) {
+        assert_eq!(samples.len(), timestamps.len());
+        let max_k = samples.len()-1;
+        // send all except last sample
+        for k in 0..max_k {
+            self.push_sample_ex(&samples[k], timestamps[k], false);
+        }
+        // send last sample with given pushthrough flag
+        if !samples.is_empty() {
+            self.push_sample_ex(&samples[max_k], timestamps[max_k], pushthrough);
+        }
+    }
+
+
+}
+
+// LSL outlets do type conversion to the defined channel format on push (even numbers to string
+// if so desired), so we can safely add all push_sample_ex() overloads (n.b. except from string to
+// number if the string doesn't actually represent a number, then the sample will be dropped)
+impl ExPushable<std::vec::Vec<f32>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &std::vec::Vec<f32>, timestamp: f64, pushthrough: bool) {
+        self.assert_len(data.len());
+        unsafe {
+            lsl_push_sample_ftp(self.handle,data.as_ptr(), timestamp, pushthrough as i32);
+        }
+    }
+}
+
+impl ExPushable<std::vec::Vec<f64>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &std::vec::Vec<f64>, timestamp: f64, pushthrough: bool) {
+        self.assert_len(data.len());
+        unsafe {
+            lsl_push_sample_dtp(self.handle,data.as_ptr(), timestamp, pushthrough as i32);
+        }
+    }
+}
+
+impl ExPushable<std::vec::Vec<i8>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &std::vec::Vec<i8>, timestamp: f64, pushthrough: bool) {
+        self.assert_len(data.len());
+        unsafe {
+            lsl_push_sample_ctp(self.handle,data.as_ptr(), timestamp, pushthrough as i32);
+        }
+    }
+}
+
+impl ExPushable<std::vec::Vec<i16>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &std::vec::Vec<i16>, timestamp: f64, pushthrough: bool) {
+        self.assert_len(data.len());
+        unsafe {
+            lsl_push_sample_stp(self.handle,data.as_ptr(), timestamp, pushthrough as i32);
+        }
+    }
+}
+
+impl ExPushable<std::vec::Vec<i32>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &std::vec::Vec<i32>, timestamp: f64, pushthrough: bool) {
+        self.assert_len(data.len());
+        unsafe {
+            lsl_push_sample_itp(self.handle,data.as_ptr(), timestamp, pushthrough as i32);
+        }
+    }
+}
+
+impl ExPushable<std::vec::Vec<i64>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &std::vec::Vec<i64>, timestamp: f64, pushthrough: bool) {
+        self.assert_len(data.len());
+        unsafe {
+            lsl_push_sample_ltp(self.handle,data.as_ptr(), timestamp, pushthrough as i32);
+        }
+    }
+}
+
+// TODO: use lsl_push_sample_butp here and require no zero-termination
+//       this saves us all the allocation work on the Rust side
+impl ExPushable<std::vec::Vec<String>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &std::vec::Vec<String>, timestamp: f64, pushthrough: bool) {
+        self.assert_len(data.len());
+        unsafe {
+            let c_strings: Vec<_> = data.iter().map(|x| {ffi::CString::new(x.as_str()).unwrap()}).collect();
+            let c_ptrs: Vec<_> = c_strings.iter().map(|x| {x.as_ptr()}).collect();
+            let c_arr = c_ptrs.as_ptr() as *mut *const std::os::raw::c_char;
+            lsl_push_sample_strtp(self.handle,c_arr, timestamp, pushthrough as i32);
+        }
+    }
+}
+
+// TODO: see above
+impl ExPushable<std::vec::Vec<&str>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &std::vec::Vec<&str>, timestamp: f64, pushthrough: bool) {
+        self.assert_len(data.len());
+        unsafe {
+            let c_strings: Vec<_> = data.iter().map(|x| {ffi::CString::new(*x).unwrap()}).collect();
+            let c_ptrs: Vec<_> = c_strings.iter().map(|x| {x.as_ptr()}).collect();
+            let c_arr = c_ptrs.as_ptr() as *mut *const std::os::raw::c_char;
+            lsl_push_sample_strtp(self.handle,c_arr, timestamp, pushthrough as i32);
+        }
+    }
+}
+
+
+pub trait Pushable<T> {
+    fn push_sample(&self, data: &T);
+    fn push_chunk(&self, data: &std::vec::Vec<T>);
+    fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>);
+}
+
+impl<T, U: ExPushable<T>> Pushable<T> for U {
+    fn push_sample(&self, data: &T) {
+        self.push_sample_ex(data, 0.0, true);
+    }
+
+    fn push_chunk(&self, data: &std::vec::Vec<T>) {
+        self.push_chunk_ex(data, 0.0, true);
+    }
+
+    fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>) {
+        self.push_chunk_stamped_ex(samples, stamps, true);
     }
 }
 
