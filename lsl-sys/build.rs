@@ -7,7 +7,7 @@ fn main() {
    build_liblsl();
 }
 
-
+// Build the liblsl library from source using cmake
 fn build_liblsl() {
    // build with cmake
    let mut cfg = cmake::Config::new("liblsl");

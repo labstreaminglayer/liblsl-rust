@@ -297,7 +297,7 @@ impl StreamInfo {
     }
 
     /**
-    Number of channels of the stream.let fm
+    Number of channels of the stream.
     A stream has at least one channel; the channel count stays constant for all samples.
     */
     pub fn channel_count(&self) -> i32 {
@@ -322,7 +322,8 @@ impl StreamInfo {
         }
     }
 
-    /** Channel format of the stream.
+    /**
+    Channel format of the stream.
     All channels in a stream have the same format. However, a device might offer multiple
     time-synched streams each with its own format.
     */
@@ -332,6 +333,161 @@ impl StreamInfo {
         }
     }
 
+    /** Unique identifier of the stream's source, if available.
+    The unique source (or device) identifier is an optional piece of information that, if
+    available, allows that endpoints (such as the recording program) can re-acquire a stream
+    automatically once it is back online.
+    */
+    pub fn source_id(&self) -> String {
+        unsafe {
+            ffi::CStr::from_ptr(lsl_get_source_id(self.handle)).to_string_lossy().into_owned()
+        }
+    }
+
+    // ======================================
+    // === Additional Hosting Information ===
+    // ======================================
+    // (these fields are implicitly assigned once bound to an outlet/inlet)
+
+
+    /**
+    Protocol version used to deliver the stream. Formatted like `lsl::protocol_version()`.
+    */
+    pub fn version(&self) -> i32 {
+        unsafe {
+            lsl_get_version(self.handle)
+        }
+    }
+
+    /**
+    Creation time stamp of the stream.
+    This is the time stamp when the stream was first created
+    (as determined via `lsl::local_clock()` on the providing machine).
+    */
+    pub fn created_at(&self) -> f64 {
+        unsafe {
+            lsl_get_created_at(self.handle)
+        }
+    }
+
+    /**
+    Unique ID of the stream outlet instance (once assigned).
+    This is a unique identifier of the stream outlet, and is guaranteed to be different
+    across multiple instantiations of the same outlet (e.g., after a re-start).
+    */
+    pub fn uid(&self) -> String {
+        unsafe {
+            ffi::CStr::from_ptr(lsl_get_uid(self.handle)).to_string_lossy().into_owned()
+        }
+    }
+
+    /**
+    Session ID for the given stream.
+    The session id is an optional human-assigned identifier of the recording session.
+    While it is rarely used, it can be used to prevent concurrent recording activitites
+    on the same sub-network (e.g., in multiple experiment areas) from seeing each other's streams
+    (assigned via a configuration file by the experimenter, see Network Connectivity in the LSL
+    wiki).
+    */
+    pub fn session_id(&self) -> String {
+        unsafe {
+            ffi::CStr::from_ptr(lsl_get_session_id(self.handle)).to_string_lossy().into_owned()
+        }
+    }
+
+    /**
+    Hostname of the providing machine.
+    */
+    pub fn hostname(&self) -> String {
+        unsafe {
+            ffi::CStr::from_ptr(lsl_get_hostname(self.handle)).to_string_lossy().into_owned()
+        }
+    }
+
+    // ========================
+    // === Data Description ===
+    // ========================
+
+    // TODO: desc() function
+
+
+    /**
+    Test whether the stream information matches the given query string.
+    The query is evaluated using the same rules that govern `lsl::resolve_bypred()`.
+    */
+    pub fn matches_query(&self, query: &str) -> bool {
+        unsafe {
+            if let Ok(query) = ffi::CString::new(query) {
+                lsl_stream_info_matches_query(self.handle, query.as_ptr()) != 0
+            } else {
+                false
+            }
+        }
+    }
+
+    // ===============================
+    // === Miscellaneous Functions ===
+    // ===============================
+
+    /**
+    Retrieve the entire streaminfo in XML format.
+    This yields an XML document (in string form) whose top-level element is `<info>`. The info
+    element contains one element for each field of the streaminfo class, including:
+
+       * the core elements `<name>`, `<type>`, `<channel_count`, `<nominal_srate>`,
+         `<channel_format>`, `<source_id>`
+       * the misc elements `<version>`, `<created_at>`, `<uid>`, `<session_id>`,
+         `<v4address>`, `<v4data_port>`, `<v4service_port>`, `<v6address>`, `<v6data_port>`,
+         `<v6service_port>`
+       * the extended description element `<desc>` with user-defined sub-elements.
+    */
+    pub fn as_xml(&self) -> String {
+        unsafe {
+            let tmpstr = lsl_get_xml(self.handle);
+            let result = ffi::CStr::from_ptr(tmpstr).to_string_lossy().into_owned();
+            lsl_destroy_string(tmpstr);
+            result
+        }
+    }
+
+    /// Number of bytes occupied by a channel (0 for string-typed channels).
+    pub fn channel_bytes(&self) -> i32 {
+        unsafe {
+            lsl_get_channel_bytes(self.handle)
+        }
+    }
+
+    /// Number of bytes occupied by a sample (0 for string-typed channels).
+    pub fn sample_bytes(&self) -> i32 {
+        unsafe {
+            lsl_get_sample_bytes(self.handle)
+        }
+    }
+
+    /// Get the native implementation handle.
+    pub fn native_handle(&self) -> lsl_streaminfo {
+        self.handle
+    }
+
+    /// Construct a blank `StreamInfo`
+    pub fn blank() -> StreamInfo {
+        StreamInfo::new("untitled", "", 0, 0.0, ChannelFormat::Undefined, "").unwrap()
+    }
+
+    /// Utility function to create a `StreamInfo` from an XML string
+    pub fn from_xml(xml: &str) -> Result<StreamInfo, &'static str> {
+        unsafe {
+            let xml = match ffi::CString::new(xml) {
+                Ok(x) => x,
+                Err(_) => return Err("XML string must not contain embedded null bytes."),
+            };
+            let handle = lsl_streaminfo_from_xml(xml.as_ptr());
+            match handle.is_null() {
+                false => Ok(StreamInfo { handle }),
+                true => Err("Failed to create StreamInfo from XML.")
+            }
+        }
+    }
 }
 
 

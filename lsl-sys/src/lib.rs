@@ -9,6 +9,7 @@ mod tests {
     use crate::lsl_local_clock;
 
     #[test]
+    // bare-bones test to confirm that liblsl is linked at all
     fn test_properly_linked() {
         unsafe {
             lsl_local_clock();
