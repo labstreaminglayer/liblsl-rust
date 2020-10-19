@@ -1,19 +1,25 @@
 /*!
 Rust API for the [Lab Streaming Layer](https://github.com/sccn/labstreaminglayer) (LSL).
-The lab streaming layer provides a set of functions to make instrument data accessible
-in real time within a lab's network. From there, streams can be picked up by recording programs,
-viewing programs or other applications that access data streams in real time.
+
+The lab streaming layer is a pub/sub system that allows for real-time exchange of multi-channel
+time series (plus arbitrary meta-data) between applications and machines on a local network (or in
+a multicast group) with time synchronization. LSL is peer-to-peer and implements service discovery
+to allow streams to be discoverable on the network.
+
+The typical use case is in lab spaces to make, e.g., instrument data from a variety of devices
+aaccessible in real time to client programs (e.g., experimentation scripts, recording programs,
+stream viewers, or live processing software). Since LSL provides a simple uniform API, a few-line
+client can receive data from devices across many device types and suppliers/vendors (such as EEG,
+eye tracking, audio, human input devices, events, etc).
 
 The API covers two areas:
-- The "push API" allows to create stream outlets and to push data (regular or irregular measurement
-  time series, event data, coded audio/video frames, etc.) into them.
-- The "pull API" allows to create stream inlets and read time-synched experiment data from them
-  (for recording, viewing or experiment control).
+- The "push API" (aka publish) allows to create stream outlets and to push data (regular or
+  irregular measurement time series, event data, coded audio/video frames, etc.) into them.
+- The "pull API" (aka subscribe) allows to create stream inlets and read time-synched experiment
+  data from them (for recording, viewing or experiment control).
 
-This is also sometimes called a pub/sub (as in publish/subscribe) system.
-
-This create provides safe bindings to the [liblsl](https://github.com/sccn/liblsl) system library
-via the low-level `lsl-sys` crate.
+This crate provides safe bindings to the [liblsl](https://github.com/sccn/liblsl) system library
+via the low-level/raw `lsl-sys` crate.
 */
 
 use lsl_sys::*;
@@ -27,6 +33,7 @@ pub const IRREGULAR_RATE: f64 = 0.0;
 
 /**
 Constant to indicate that a sample has the next successive time stamp.
+
 This is an optional optimization to transmit less data per sample.
 The stamp is then deduced from the preceding one according to the stream's sampling rate
 (in the case of an irregular rate, the same time stamp as before will is assumed).
@@ -35,6 +42,7 @@ pub const DEDUCED_TIMESTAMP: f64 = -1.0;
 
 /**
 A very large time duration (> 1 year) for timeout values.
+
 Note that significantly larger numbers can cause the timeout to be invalid on some
 operating systems (e.g., 32-bit UNIX).
 */
@@ -96,7 +104,7 @@ pub enum ProcessingOptions {
 
 
 /**
-Protocol version.
+Protocol version number.
 - The major version is protocol_version() / 100;
 - The minor version is protocol_version() % 100;
 
@@ -110,7 +118,7 @@ pub fn protocol_version() -> i32 {
 }
 
 /**
-Version of the liblsl library.
+Version number of the liblsl library.
 - The major version is library_version() / 100;
 - The minor version is library_version() % 100;
 */
@@ -122,9 +130,10 @@ pub fn library_version() -> i32 {
 
 
 /**
-Get a string containing library information. The format of the string shouldn't be used
-for anything important except giving a a debugging person a good idea which exact library
-version is used.
+Get a string containing library/build information.
+
+The format of the string shouldn't be used for anything important except giving a debugging person
+a good idea which exact library version is used.
 */
 pub fn library_info() -> String {
     unsafe {
@@ -134,11 +143,13 @@ pub fn library_info() -> String {
 
 
 /**
-Obtain a local system time stamp in seconds. The resolution is better than a millisecond.
-This reading can be used to assign time stamps to samples as they are being acquired.
-If the "age" of a sample is known at a particular time (e.g., from USB transmission
-delays), it can be used as an offset to local_clock() to obtain a better estimate of
-when a sample was actually captured. See StreamOutlet::push_sample() for a use case.
+Obtain a local system time stamp in seconds.
+
+The resolution is better than a millisecond. This reading can be used to assign time stamps to
+samples as they are being acquired. If the "age" of a sample is known at a particular time
+(e.g., from USB transmission delays), it can be used as an offset to `local_clock()` to obtain a
+better estimate of when a sample was actually captured. See `StreamOutlet::push_sample()` for a
+use case.
 */
 pub fn local_clock() -> f64 {
     unsafe {
@@ -153,7 +164,8 @@ pub fn local_clock() -> f64 {
 
 /**
 The StreamInfo object stores the declaration of a data stream.
-Represents the following information:
+
+It represents the following information:
 * stream data format (number of channels, channel format)
 * core information (stream name, content type, sampling rate)
 * optional meta-data about the stream content (channel labels, measurement units, etc.)
@@ -199,22 +211,22 @@ impl StreamInfo {
     pub fn new(stream_name: &str, stream_type: &str, channel_count: i32, nominal_srate: f64,
                channel_format: ChannelFormat, source_id: &str) -> Result<StreamInfo, &'static str>
     {
+        let stream_name = match ffi::CString::new(stream_name) {
+            Ok(n) => n,
+            Err(_) => return Err("could not convert stream_name to CString \
+                                      (contained 0 bytes?)"),
+        };
+        let stream_type = match ffi::CString::new(stream_type) {
+            Ok(t) => t,
+            Err(_) => return Err("could not convert stream_type to CString \
+                                      (contained 0 bytes?)"),
+        };
+        let source_id = match ffi::CString::new(source_id) {
+            Ok(i) => i,
+            Err(_) => return Err("could not convert source_id to CString \
+                                      (contained 0 bytes?)"),
+        };
         unsafe {
-            let stream_name = match ffi::CString::new(stream_name) {
-                Ok(n) => n,
-                Err(_) => return Err("could not convert stream_name to CString \
-                                      (contained 0 bytes?)"),
-            };
-            let stream_type = match ffi::CString::new(stream_type) {
-                Ok(t) => t,
-                Err(_) => return Err("could not convert stream_type to CString \
-                                      (contained 0 bytes?)"),
-            };
-            let source_id = match ffi::CString::new(source_id) {
-                Ok(i) => i,
-                Err(_) => return Err("could not convert source_id to CString \
-                                      (contained 0 bytes?)"),
-            };
             let handle = lsl_create_streaminfo(
                 stream_name.as_ptr(),
                 stream_type.as_ptr(),
@@ -384,12 +396,12 @@ impl StreamInfo {
     The query is evaluated using the same rules that govern `lsl::resolve_bypred()`.
     */
     pub fn matches_query(&self, query: &str) -> bool {
-        unsafe {
-            if let Ok(query) = ffi::CString::new(query) {
+        if let Ok(query) = ffi::CString::new(query) {
+            unsafe {
                 lsl_stream_info_matches_query(self.handle, query.as_ptr()) != 0
-            } else {
-                false
             }
+        } else {
+            false
         }
     }
 
@@ -438,17 +450,17 @@ impl StreamInfo {
     }
 
     /// Construct a blank `StreamInfo`.
-    pub fn new_blank() -> StreamInfo {
+    pub fn from_blank() -> StreamInfo {
         StreamInfo::new("untitled", "", 0, 0.0, ChannelFormat::Undefined, "").unwrap()
     }
 
     /// Create a `StreamInfo` from an XML string.
     pub fn from_xml(xml: &str) -> Result<StreamInfo, &'static str> {
+        let xml = match ffi::CString::new(xml) {
+            Ok(x) => x,
+            Err(_) => return Err("XML string must not contain embedded null bytes."),
+        };
         unsafe {
-            let xml = match ffi::CString::new(xml) {
-                Ok(x) => x,
-                Err(_) => return Err("XML string must not contain embedded null bytes."),
-            };
             let handle = lsl_streaminfo_from_xml(xml.as_ptr());
             match handle.is_null() {
                 false => Ok(StreamInfo { handle }),
@@ -461,6 +473,7 @@ impl StreamInfo {
     /// The info object takes ownership of the handle and will deallocate it on drop.
     pub fn from_handle(handle: lsl_streaminfo) -> StreamInfo {
         if handle.is_null() {
+            // panicking since this would be either a programmer error or a probably fatal lib error
             panic!("Attempted to create a `StreamInfo` from a NULL handle.")
         }
         StreamInfo { handle }
@@ -499,7 +512,7 @@ impl Clone for StreamInfo {
 A stream outlet.
 Outlets are used to make streaming data (and the meta-data) available on the lab network.
 
-The actual sample pushing functionality is provided via the `Pushable` and `ExPushable` traits
+The actual sample-pushing functionality is provided via the `Pushable` and `ExPushable` traits
 below.
 */
 pub struct StreamOutlet {
@@ -585,9 +598,11 @@ impl StreamOutlet {
 }
 
 /**
-A trait that enables the methods `push_sample<T>()` and `push_chunk<T>()`, among others, for
-different data types T that are understood by LSL (i32, f64, str, etc.). This is implemented by
+A trait that enables the methods `push_sample<T>()` and `push_chunk<T>()`. Implemented by
 StreamOutlet.
+
+See also the `ExPushable` trait for the extended-argument versions of these methods,
+`push_sample_ex<T>()` and `push_chunk_ex<T>()`.
 */
 pub trait Pushable<T> {
     /**
@@ -610,10 +625,9 @@ pub trait Pushable<T> {
 
     The data are time-stamped with the current time (using `local_clock()`), and immediately
     transmitted (unless a `chunk_size` was provided at outlet construction, which causes the data
-    to be internally re-aggregated without loss of performance into chunks of that specified size
-    for to transmission). See also `push_chunk_ex()` (provided by `ExPushable` trait) for a
-    variant that allows for overriding the timestamp and implicit push-through (queue flush)
-    behavior.
+    to be internally re-aggregated into chunks of that specified size for transmission). See also
+    `push_chunk_ex()` (provided by `ExPushable` trait) for a variant that allows for overriding the
+    timestamp and implicit push-through (queue flush) behavior.
     */
     fn push_chunk(&self, data: &std::vec::Vec<T>);
 
@@ -626,9 +640,9 @@ pub trait Pushable<T> {
     * `timestamps`: A `Vec` of capture times for each sample, in agreement with `local_clock()`.
 
     The data are immediately transmitted (unless a `chunk_size` was provided at outlet
-    construction, which causes the data to be internally re-aggregated without loss of performance
-    into chunks of that specified size for to transmission). See also `push_chunk_ex()` (provided
-    by `ExPushable` trait) for a variant that allows for overriding this behavior.
+    construction, which causes the data to be internally re-aggregated into chunks of that
+    specified size for ttransmission). See also `push_chunk_ex()` (provided by `ExPushable` trait)
+    for a variant that allows for overriding this behavior.
     */
     fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>);
 }
@@ -649,9 +663,8 @@ impl<T, U: ExPushable<T>> Pushable<T> for U {
 }
 
 /**
-A trait that enables the methods `push_sample_ex<T>()` and `push_chunk_ex<T>()` for different
-data types T that are understood by LSL (i32, f64, str, etc.). This is implemented by StreamOutlet.
-
+A trait that enables the methods `push_sample_ex<T>()` and `push_chunk_ex<T>()`.
+Implemented by StreamOutlet.
 
 See also the `Pushable` trait for the simpler methods `push_sample<T>()` and `push_chunk<T>()`.
 */
@@ -667,8 +680,8 @@ pub trait ExPushable<T>: HasNominalRate {
     * `timestamp`: Optionally the capture time of the sample, in agreement with `local_clock()`;
        if passed as 0.0, the current time is used.
     * `pushthrough`: Whether to push the sample through to the receivers instead of buffering it
-       with subsequent samples. Note that the `chunk_size`, if specified at outlet construction,
-       takes precedence over the pushthrough flag.
+       with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
+       specified at outlet construction, takes precedence over the pushthrough flag.
 
     See also `push_sample()` for a simpler variant with default values for `timestamp` and
     `pushthrough` (defined in `Pushable` trait).
@@ -684,8 +697,8 @@ pub trait ExPushable<T>: HasNominalRate {
        `local_clock()`; if specified as 0.0, the current time is used. The time stamps of other
        samples are automatically derived according to the sampling rate of the stream.
     * `pushthrough`: Whether to push the chunk through to the receivers instead of buffering it
-       with subsequent samples. Note that the `chunk_size`, if specified at outlet construction,
-       takes precedence over the pushthrough flag.
+       with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
+       specified at outlet construction, takes precedence over the pushthrough flag.
 
     See also `push_chunk()` for a simpler variant with default values for `timestamp` and
     `pushthrough` (defined in `Pushable` trait).
@@ -717,8 +730,8 @@ pub trait ExPushable<T>: HasNominalRate {
     * `samples`: A `Vec` of samples, each in a format accepted by `push_sample()` (e.g., `Vec`).
     * `timestamps`: A `Vec` of capture times for each sample, in agreement with `local_clock()`.
     * `pushthrough`: Whether to push the chunk through to the receivers instead of buffering it
-       with subsequent samples. Note that the `chunk_size`, if specified at outlet construction,
-       takes precedence over the pushthrough flag.
+       with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
+       specified at outlet construction, takes precedence over the pushthrough flag.
     */
     fn push_chunk_stamped_ex(&self, samples: &std::vec::Vec<T>, timestamps: &std::vec::Vec<f64>, pushthrough: bool) {
         assert_eq!(samples.len(), timestamps.len());
@@ -839,6 +852,131 @@ impl HasNominalRate for StreamOutlet {
         self.nominal_rate
     }
 }
+
+
+// ===========================
+// ==== Resolve Functions ====
+// ===========================
+
+/**
+Resolve all streams on the network.
+
+This function returns all currently available streams from any outlet on the network.
+The network is usually the subnet specified at the local router, but may also include
+a multicast group of machines (given that the network supports it), or list of hostnames.
+These details may optionally be customized by the experimenter in a configuration file
+(see Network Connectivity in the LSL wiki).
+This is the default mechanism used by the browsing programs and the recording program.
+
+Arguments:
+* `wait_time`: The waiting time for the operation, in seconds, to search for streams. A good value
+   is around 1.0 or 2.0 seconds. *Warning*: If this is too short (<0.5s) only a subset (or none) of
+   the outlets that are present on the network may be returned.
+
+Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
+be used to open an inlet. The full info can be retrieved from the inlet if needed.
+*/
+pub fn resolve_streams(wait_time: f64) -> std::vec::Vec<StreamInfo> {
+    // the fixed-size buffer is safe since the native function uses it as the max number of results
+    let mut buffer = [0 as lsl_streaminfo; 1024];
+    unsafe {
+        let num_resolved = lsl_resolve_all(
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            wait_time) as usize;
+        let results: Vec<_> = buffer[0..num_resolved].iter().map(
+            |x| {StreamInfo::from_handle(*x)}).collect();
+        results
+    }
+}
+
+/**
+Resolve all streams with a specific value for a given property.
+
+If the goal is to resolve a specific stream, this method is preferred over resolving all streams
+and then selecting the desired one.
+
+Arguments:
+* `prop`: The `StreamInfo` property that should have a specific value (e.g., "name", "type",
+  "source_id", or "desc/manufaturer").
+* `value`: The string value that the property should have (e.g., "EEG" as the type property).
+* `minimum`: Return at least this number of streams.
+* `timeout`: A timeout for the operation, in seconds. If the timeout expires, less than the desired
+   number of streams (possibly none) will be returned. You could use the value `lsl::FOREVER` here,
+   or at least 1.0 to 2.0 seconds to allow for results to come in on a busy network. *Warning*: If
+   this is too short (<0.5s) only a subset (or none) of the outlets that are present on the network
+   may be returned.
+
+Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
+be used to open an inlet. The full info can be retrieved from the inlet if needed.
+*/
+pub fn resolve_byprop(prop: &str, value: &str, minimum: i32, wait_time: f64) -> std::vec::Vec<StreamInfo> {
+    // the fixed-size buffer is safe since the native function uses it as the max number of results
+    let mut buffer = [0 as lsl_streaminfo; 1024];
+    let prop = match ffi::CString::new(prop) {
+        Ok(s) => s,
+        Err(_) => return std::vec::Vec::new(),
+    };
+    let value = match ffi::CString::new(value) {
+        Ok(s) => s,
+        Err(_) => return std::vec::Vec::new(),
+    };
+    unsafe {
+        let num_resolved = lsl_resolve_byprop(
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            prop.as_ptr(),
+            value.as_ptr(),
+            minimum,
+            wait_time) as usize;
+        let results: Vec<_> = buffer[0..num_resolved].iter().map(
+            |x| {StreamInfo::from_handle(*x)}).collect();
+        results
+    }
+}
+
+
+/**
+Resolve all streams that match a given predicate.
+
+Advanced query that allows to impose more conditions on the retrieved streams; the given
+string is an [XPath 1.0](http://en.wikipedia.org/w/index.php?title=XPath_1.0) predicate evaluated
+against the `<info>` element of the `StreamInfo`'s equivalent XML body (omitting the
+surrounding []'s), for each stream that's on the network.
+
+Arguments:
+* `pred`: The predicate string, e.g. `name='BioSemi'` or
+     `type='EEG' and starts-with(name,'BioSemi') and count(info/desc/channel)=32`
+* `minimum`: Return at least this many streams.
+* `timeout`: A timeout for the operation, in seconds. If the timeout expires, less than the desired
+   number of streams (possibly none) will be returned. You could use the value `lsl::FOREVER` here,
+   or at least 1.0 to 2.0 seconds to allow for results to come in on a busy network. *Warning*: If
+   this is too short (<0.5s) only a subset (or none) of the outlets that are present on the network
+   may be returned.
+
+Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
+be used to open an inlet. The full info can be retrieved from the inlet if needed.
+*/
+pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> std::vec::Vec<StreamInfo> {
+    // the fixed-size buffer is safe since the native function uses it as the max number of results
+    let mut buffer = [0 as lsl_streaminfo; 1024];
+    let pred = match ffi::CString::new(pred) {
+        Ok(s) => s,
+        Err(_) => return std::vec::Vec::new(),
+    };
+    unsafe {
+        let num_resolved = lsl_resolve_bypred(
+            buffer.as_mut_ptr(),
+            buffer.len() as u32,
+            pred.as_ptr(),
+            minimum,
+            wait_time) as usize;
+        let results: Vec<_> = buffer[0..num_resolved].iter().map(
+            |x| {StreamInfo::from_handle(*x)}).collect();
+        results
+    }
+}
+
 
 // helper functions for interop with native data types in the lsl_sys module
 impl ChannelFormat {
