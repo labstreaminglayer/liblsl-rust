@@ -15,3 +15,5 @@ members = ["lsl-sys"]
 [dependencies]
 lsl-sys = { version = "0.1.0", path = "lsl-sys" }
 
+[dev-dependencies]
+rand = "~0.7"

@@ -409,7 +409,7 @@ impl StreamInfo {
          `<v6service_port>`
        * the extended description element `<desc>` with user-defined sub-elements.
     */
-    pub fn as_xml(&self) -> String {
+    pub fn to_xml(&self) -> String {
         unsafe {
             let tmpstr = lsl_get_xml(self.handle);
             let result = ffi::CStr::from_ptr(tmpstr).to_string_lossy().into_owned();
@@ -438,7 +438,7 @@ impl StreamInfo {
     }
 
     /// Construct a blank `StreamInfo`.
-    pub fn blank() -> StreamInfo {
+    pub fn new_blank() -> StreamInfo {
         StreamInfo::new("untitled", "", 0, 0.0, ChannelFormat::Undefined, "").unwrap()
     }
 
@@ -458,6 +458,7 @@ impl StreamInfo {
     }
 
     /// Create a `StreamInfo` from a native handle.
+    /// The info object takes ownership of the handle and will deallocate it on drop.
     pub fn from_handle(handle: lsl_streaminfo) -> StreamInfo {
         if handle.is_null() {
             panic!("Attempted to create a `StreamInfo` from a NULL handle.")
@@ -497,6 +498,9 @@ impl Clone for StreamInfo {
 /**
 A stream outlet.
 Outlets are used to make streaming data (and the meta-data) available on the lab network.
+
+The actual sample pushing functionality is provided via the `Pushable` and `ExPushable` traits
+below.
 */
 pub struct StreamOutlet {
     // internal fields used by the Rust wrapper
@@ -516,9 +520,9 @@ impl StreamOutlet {
     * `chunk_size`: The desired chunk granularity (in samples) for transmission.
        If specified as 0, each push operation yields one chunk. Inlets can override this setting.
     * `max_buffered`: The maximum amount of data to buffer (in seconds if there is a
-       nominal sampling rate, otherwise x100 in samples).  good default is 360, which corresponds
+       nominal sampling rate, otherwise x100 in samples). A good default is 360, which corresponds
        to 6 minutes of data. Note that, for high-bandwidth data you should consider using a lower
-       value here to avoid running out of RAM.
+       value here to avoid running out of RAM in case data have to be buffered unexpectedly.
     */
     pub fn new(info: &StreamInfo, chunk_size: i32, max_buffered: i32) -> Result<StreamOutlet, &'static str> {
         unsafe {
@@ -565,38 +569,127 @@ impl StreamOutlet {
         unsafe {
             let info_handle = lsl_get_info(self.handle);
             match info_handle.is_null() {
+                // this handle already refers to a copy the outlet's info object so the transfer is
+                // lightweight
                 false => Ok(StreamInfo::from_handle(info_handle)),
                 true => Err("Could not obtain stream info for this outlet.")
             }
         }
     }
 
-    // Utility function that checks whether a given length value matches the channel count
+    // Internal utility function that checks whether a given length value matches the channel count
     fn assert_len(&self, len: usize) {
         assert_eq!(len, self.channel_count, "StreamOutlet received data whose length {} does not \
                    match the outlet's channel count {}", len, self.channel_count);
     }
 }
 
-/// Exposes a sampling rate via the property nominal_srate()
-pub trait HasNominalRate {
-    fn nominal_srate(&self) -> f64;
+/**
+A trait that enables the methods `push_sample<T>()` and `push_chunk<T>()`, among others, for
+different data types T that are understood by LSL (i32, f64, str, etc.). This is implemented by
+StreamOutlet.
+*/
+pub trait Pushable<T> {
+    /**
+    Push a vector of values of some type as a sample into the outlet.
+    Each entry in the vector corresponds to one channel. The function handles type checking &
+    conversion.
+
+    The data are time-stamped with the current time (using `local_clock()`), and immediately
+    transmitted (unless a `chunk_size` was provided at outlet construction, which overrides in what
+    granularity data are transmitted). See also `push_chunk_ex()` (provided by `ExPushable` trait)
+    for a variant that allows for overriding the timestamp and implicit push-through (queue flush)
+    behavior.
+    */
+    fn push_sample(&self, data: &T);
+
+
+    /**
+    Push a chunk of samples (batched into a `Vec`) into the outlet. Each element of the given
+    vector must itself be in a format accepted by `push_sample()` (e.g., `Vec`).
+
+    The data are time-stamped with the current time (using `local_clock()`), and immediately
+    transmitted (unless a `chunk_size` was provided at outlet construction, which causes the data
+    to be internally re-aggregated without loss of performance into chunks of that specified size
+    for to transmission). See also `push_chunk_ex()` (provided by `ExPushable` trait) for a
+    variant that allows for overriding the timestamp and implicit push-through (queue flush)
+    behavior.
+    */
+    fn push_chunk(&self, data: &std::vec::Vec<T>);
+
+    /**
+    Push a chunk of samples (batched into a `Vec`) along with a separate time stamp for each
+    sample (for irregular-rate streams) into the outlet.
+
+    Arguments:
+    * `samples`: A `Vec` of samples, each in a format accepted by `push_sample()` (e.g., `Vec`).
+    * `timestamps`: A `Vec` of capture times for each sample, in agreement with `local_clock()`.
+
+    The data are immediately transmitted (unless a `chunk_size` was provided at outlet
+    construction, which causes the data to be internally re-aggregated without loss of performance
+    into chunks of that specified size for to transmission). See also `push_chunk_ex()` (provided
+    by `ExPushable` trait) for a variant that allows for overriding this behavior.
+    */
+    fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>);
 }
 
-impl HasNominalRate for StreamOutlet {
-    fn nominal_srate(&self) -> f64 {
-        self.nominal_rate
+// Pushable is basically a convenience layer on top of ExPushable
+impl<T, U: ExPushable<T>> Pushable<T> for U {
+    fn push_sample(&self, data: &T) {
+        self.push_sample_ex(data, 0.0, true);
+    }
+
+    fn push_chunk(&self, data: &std::vec::Vec<T>) {
+        self.push_chunk_ex(data, 0.0, true);
+    }
+
+    fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>) {
+        self.push_chunk_stamped_ex(samples, stamps, true);
     }
 }
 
 /**
-A trait that enables the methods push_*_ex<T>() for different values of T that are understood by
-LSL (i32, f64, str, etc.) on some object. This is implemented by StreamOutlet.
+A trait that enables the methods `push_sample_ex<T>()` and `push_chunk_ex<T>()` for different
+data types T that are understood by LSL (i32, f64, str, etc.). This is implemented by StreamOutlet.
+
+
+See also the `Pushable` trait for the simpler methods `push_sample<T>()` and `push_chunk<T>()`.
 */
 pub trait ExPushable<T>: HasNominalRate {
 
+    /**
+    Push a vector of values of some type as a sample into the outlet.
+    Each entry in the vector corresponds to one channel. The function handles type checking &
+    conversion.
+
+    Arguments:
+    * `data`: A vector of values to push (one for each channel).
+    * `timestamp`: Optionally the capture time of the sample, in agreement with `local_clock()`;
+       if passed as 0.0, the current time is used.
+    * `pushthrough`: Whether to push the sample through to the receivers instead of buffering it
+       with subsequent samples. Note that the `chunk_size`, if specified at outlet construction,
+       takes precedence over the pushthrough flag.
+
+    See also `push_sample()` for a simpler variant with default values for `timestamp` and
+    `pushthrough` (defined in `Pushable` trait).
+    */
     fn push_sample_ex(&self, data: &T, timestamp: f64, pushthrough: bool);
 
+    /**
+    Push a chunk of samples (batched into a `Vec`) into the outlet.
+
+    Arguments:
+    * `samples`: A `Vec` of samples, each in a format accepted by `push_sample()` (e.g., `Vec`).
+    * `timestamp`: Optionally the capture time of the most recent sample, in agreement with
+       `local_clock()`; if specified as 0.0, the current time is used. The time stamps of other
+       samples are automatically derived according to the sampling rate of the stream.
+    * `pushthrough`: Whether to push the chunk through to the receivers instead of buffering it
+       with subsequent samples. Note that the `chunk_size`, if specified at outlet construction,
+       takes precedence over the pushthrough flag.
+
+    See also `push_chunk()` for a simpler variant with default values for `timestamp` and
+    `pushthrough` (defined in `Pushable` trait).
+    */
     fn push_chunk_ex(&self, samples: &std::vec::Vec<T>, timestamp: f64, pushthrough: bool) {
         if !samples.is_empty() {
             let mut timestamp = if timestamp == 0.0 { local_clock() } else { timestamp };
@@ -616,6 +709,17 @@ pub trait ExPushable<T>: HasNominalRate {
         }
     }
 
+    /**
+    Push a chunk of samples (batched into a `Vec`) into the outlet.
+    Allows for specifying a separate time stamp for each sample (for irregular-rate streams).
+
+    Arguments:
+    * `samples`: A `Vec` of samples, each in a format accepted by `push_sample()` (e.g., `Vec`).
+    * `timestamps`: A `Vec` of capture times for each sample, in agreement with `local_clock()`.
+    * `pushthrough`: Whether to push the chunk through to the receivers instead of buffering it
+       with subsequent samples. Note that the `chunk_size`, if specified at outlet construction,
+       takes precedence over the pushthrough flag.
+    */
     fn push_chunk_stamped_ex(&self, samples: &std::vec::Vec<T>, timestamps: &std::vec::Vec<f64>, pushthrough: bool) {
         assert_eq!(samples.len(), timestamps.len());
         let max_k = samples.len()-1;
@@ -628,8 +732,6 @@ pub trait ExPushable<T>: HasNominalRate {
             self.push_sample_ex(&samples[max_k], timestamps[max_k], pushthrough);
         }
     }
-
-
 }
 
 // LSL outlets do type conversion to the defined channel format on push (even numbers to string
@@ -719,28 +821,6 @@ impl ExPushable<std::vec::Vec<&str>> for StreamOutlet {
     }
 }
 
-
-pub trait Pushable<T> {
-    fn push_sample(&self, data: &T);
-    fn push_chunk(&self, data: &std::vec::Vec<T>);
-    fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>);
-}
-
-impl<T, U: ExPushable<T>> Pushable<T> for U {
-    fn push_sample(&self, data: &T) {
-        self.push_sample_ex(data, 0.0, true);
-    }
-
-    fn push_chunk(&self, data: &std::vec::Vec<T>) {
-        self.push_chunk_ex(data, 0.0, true);
-    }
-
-    fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>) {
-        self.push_chunk_stamped_ex(samples, stamps, true);
-    }
-}
-
-
 impl Drop for StreamOutlet {
     fn drop(&mut self) {
         unsafe {
@@ -749,6 +829,16 @@ impl Drop for StreamOutlet {
     }
 }
 
+/// Exposes a sampling rate via the property nominal_srate().
+pub trait HasNominalRate {
+    fn nominal_srate(&self) -> f64;
+}
+
+impl HasNominalRate for StreamOutlet {
+    fn nominal_srate(&self) -> f64 {
+        self.nominal_rate
+    }
+}
 
 // helper functions for interop with native data types in the lsl_sys module
 impl ChannelFormat {

@@ -1,5 +1,8 @@
 use lsl::*;
 
+use std::vec;
+use rand::Rng;
+
 // send event markers
 fn send_markers() {
     println!("Declaring a new stream info...");
@@ -39,6 +42,32 @@ fn send_data() {
     }
 }
 
+// send streaming numeric data in chunks
+fn send_data_in_chunks() {
+    println!("Declaring a new stream info...");
+    let info = lsl::StreamInfo::new(
+        "My Stream", "EEG", 8, 100.0,
+        lsl::ChannelFormat::Float32, "dsfge4646"
+    ).unwrap();
+
+    println!("Opening outlet...");
+    let outlet = lsl::StreamOutlet::new(&info, 0, 360).unwrap();
+
+    println!("Now streaming...");
+    // we'll be sending one chunk of 10 samples every 100ms (that gives a 100Hz data rate)
+    let dur = std::time::Duration::from_millis(100);
+    let mut rng = rand::thread_rng();
+    loop {
+        let mut mychunk = vec::Vec::new();
+        for _ in 0..10 {
+            let sample: Vec<i32> = (0..8).map(|_| rng.gen_range(-15, 15)).collect();
+            mychunk.push(sample);
+        }
+        outlet.push_chunk(&mychunk);
+        std::thread::sleep(dur);
+    }
+}
+
 // show off some gymnastics that are expected to work
 fn type_gymnastics() {
     // create a streaminfo
@@ -51,7 +80,7 @@ fn type_gymnastics() {
     // get the info of that outlet
     let info2 = outlet.info().unwrap();
     // xml repr of that info
-    let xml = info2.as_xml();
+    let xml = info2.to_xml();
     println!("XML was: {}", xml);
     // create a new info from that
     let info3 = lsl::StreamInfo::from_xml(&xml).unwrap();
@@ -61,6 +90,7 @@ fn type_gymnastics() {
 
 
 fn main() {
+    send_data_in_chunks();
     send_markers();
     send_data();
     type_gymnastics();
