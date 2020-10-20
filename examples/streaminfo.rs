@@ -23,7 +23,7 @@ fn main() {
     println!("  hostname = {:?}", info.hostname());
 
     println!("\nThe stream's equivalent XML representation is:");
-    println!("{}", info.as_xml());
+    println!("{}", info.to_xml());
 
     println!("The following example queries evaluate as:");
     println!("  matches query \"type='EEG'\": {}", info.matches_query("type='EEG'"));
@@ -32,7 +32,7 @@ fn main() {
     println!("\nThe stream's miscellaneous info is:");
     println!("  channel_bytes = {}", info.channel_bytes());
     println!("  sample_bytes = {}", info.sample_bytes());
-    println!("  native_handle = {:?}", info.handle());
+    println!("  native_handle = {:?}", info.native_handle());
 
     println!();
 }

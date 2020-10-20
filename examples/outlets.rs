@@ -17,7 +17,7 @@ fn send_markers() {
     println!("Now streaming...");
     let dur = std::time::Duration::from_millis(1000);
     loop {
-        outlet.push_sample(&vec!("Hello!"));
+        outlet.push_sample(&vec!("Hello!")).expect("push_sample failed!");
         std::thread::sleep(dur);
     }
 
@@ -37,7 +37,7 @@ fn send_data() {
     println!("Now streaming...");
     let dur = std::time::Duration::from_millis(10);
     loop {
-        outlet.push_sample(&vec!(1,2,3,4,5,6,7,8));
+        outlet.push_sample(&vec!(1,2,3,4,5,6,7,8)).expect("push_sample failed!");
         std::thread::sleep(dur);
     }
 }
@@ -63,7 +63,7 @@ fn send_data_in_chunks() {
             let sample: Vec<i32> = (0..8).map(|_| rng.gen_range(-15, 15)).collect();
             mychunk.push(sample);
         }
-        outlet.push_chunk(&mychunk);
+        outlet.push_chunk(&mychunk).expect("push_sample failed!");
         std::thread::sleep(dur);
     }
 }
