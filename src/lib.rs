@@ -97,7 +97,7 @@ pub enum ChannelFormat {
 
 /// Post-processing options for stream inlets.
 #[derive(Copy, Clone, Debug)]
-pub enum ProcessingOptions {
+pub enum ProcessingOption {
     /// No automatic post-processing; return the ground-truth time stamps for manual post-
     /// processing (this is the default behavior of the inlet).
     None = 0,
@@ -114,6 +114,7 @@ pub enum ProcessingOptions {
     /// Post-processing is thread-safe (same inlet can be read from by multiple threads);
     /// uses somewhat more CPU.
     Threadsafe = 8,
+    Nonsense = 16,
     /// The combination of all possible post-processing options.
     ALL = 1|2|4|8
 }
@@ -1079,6 +1080,188 @@ impl StreamInlet {
             }
         }
     }
+
+    /**
+    Subscribe to the data stream.
+
+    All samples pushed in at the other end from this moment onwards will be queued and eventually
+    be delivered in response to `pull_sample()` or `pull_chunk()` calls.
+
+    In most applications it is not necessary to call this function since the stream will be opened
+    implicitly upon the first call to any of the `pull_*()` operations. However, it can be used in
+    order to not lose samples that had been sent over the stream prior to the first `pull_*()` call.
+
+    Arguments:
+    * `timeout` Optional timeout of the operation. To have no timeout, you can use `lsl::FOREVER`
+       here. A timeout can make sense if you want to catch connection errors (e.g., due to
+       misconfigured firewalls or the like).
+
+    Besides an `Error::Timeout`, this may also throw an `Error::StreamLost`, if the stream source
+    has been lost in the meantime (see also `recover` option in `::new()`).
+    */
+    pub fn open_stream(&self, timeout: f64) -> Result<()> {
+        let mut ec = [0 as i32];
+        unsafe {
+            lsl_open_stream(self.handle, timeout, ec.as_mut_ptr());
+            ec_to_result(ec[0])?;
+        }
+        Ok(())
+    }
+
+    /**
+    Unsubscribe from the current data stream.
+
+    All samples that are still buffered or in flight will be dropped and transmission
+    and buffering of data for this inlet will be stopped. If an application stops being
+    interested in data from a source (temporarily or not) but keeps the outlet alive,
+    it should call `close_stream()` to not waste unnecessary system and network
+    resources.
+    */
+    pub fn close_stream(&self) {
+        unsafe {
+            lsl_close_stream(self.handle);
+        }
+    }
+
+    /**
+    Retrieve an estimated time correction offset for the given stream.
+
+    The first call to this function takes several milliseconds until a reliable first estimate is
+    obtained. Subsequent calls are instantaneous (and rely on periodic background updates). On a
+    well-behaved network, the precision of these estimates should be below 1 ms (empirically it is
+    within +/-0.2 ms).
+
+    To get a measure of whether the network is well-behaved, see also the extended version
+    time_correction_ex(), which additionally returns the uncertainty (which maps to
+    round-trip-time).
+
+    Empirically, 0.2 ms a typical value for wired networks. 2 ms is typical of wireless networks.
+    The number can be much higher on poor networks.
+
+    Arguments:
+    * `timeout`: Timeout to acquire the first time-correction estimate. You can use the value
+       `lsl::FOREVER` to have no timeout. Otherwise, 2.0-5.0 seconds would be a reasonable timeout.
+       Note that even if the timeout fails, the library will continue to attempt retrieving a
+       time-correction estimate in the background, which can be queried in a subsequent call.
+
+    Returns the time correction estimate. This is the number that needs to be added to a time
+    stamp that was remotely generated via `local_clock()` to map it into the local clock domain of
+    this machine.
+
+    Besides an `Error::Timeout`, this may also throw an `Error::StreamLost`, if the stream source
+    has been lost in the meantime (see also `recover` option in `::new()`).
+    */
+    pub fn time_correction(&self, timeout: f64) -> Result<f64> {
+        let mut ec = [0 as i32];
+        unsafe {
+            let result = lsl_time_correction(self.handle, timeout, ec.as_mut_ptr());
+            ec_to_result(ec[0])?;
+            Ok(result)
+        }
+    }
+
+    /**
+    Retrieve extended time-correction information for the given stream.
+
+    This function is used like `time_correction()`, but instead returns a tuple of 3 values,
+    which are (`time_offset`, `remote_time`, `uncertainty`), where:
+
+    * `time_offset` corresponds to the return value of `time_correction()` (see for explanation).
+    * `remote_time` is the remote time when the measurement was made, and
+       consequently `remote_time - time_offset` is the local time when that measurement was made
+       (this will typically lie as much as a few seconds before the current time point, since the
+       function only returns the most recent measurement that was made).
+    * `uncertainty` is the round-trip-time of the measurement in seconds, which can be taken as
+       the standard deviation of the estimate.
+    */
+    pub fn time_correction_ex(&self, timeout: f64) -> Result<(f64, f64, f64)> {
+        let mut ec = [0 as i32];
+        let mut retvals = [0.0, 0.0];
+        unsafe {
+            let result = lsl_time_correction_ex(
+                self.handle,
+                retvals[0..].as_mut_ptr(),
+                retvals[1..].as_mut_ptr(),
+                timeout,
+                ec.as_mut_ptr());
+            ec_to_result(ec[0])?;
+            Ok((result, retvals[0], retvals[1]))
+        }
+    }
+
+    /**
+    Set post-processing flags to use.
+
+    By default, the inlet performs NO post-processing and returns the ground-truth time
+    stamps, which can then be manually synchronized using `time_correction()`, and then
+    smoothed/dejittered if desired. This function allows automating these two and possibly
+    more operations.
+
+    *Warning*: when you enable this, you will no longer receive or be able to recover the
+    original time stamps.
+
+    Arguments:
+    * `options`: an array of `ProcessingOption` values that shall be set. You can also pass in
+       the value `[ProcessingOption::ALL]` to enable all options or an empty array to clear all
+       previously set options.
+    */
+    pub fn set_postprocessing(&self, options: &[ProcessingOption]) {
+        unsafe {
+            let mut flags: u32 = 0;
+            for &opt in options {
+                flags |= opt as u32;
+            }
+            let ec = lsl_set_postprocessing(self.handle, flags as u32);
+            if let Err(kind) = ec_to_result(ec) {
+                // this should only happen in response to an unsupported flag being passed in,
+                // which would indicate a lib version incompatibility (i.e., fatal)
+                panic!("{}", kind);
+            }
+        }
+    }
+
+    /**
+    Query whether samples are currently available for immediate pickup.
+
+    Note that it is not a good idea to use `samples_available()` to determine whether
+    a `pull_*()` call would block: to be sure, set the pull timeout to 0.0 or an acceptably
+    low value. If the underlying implementation supports it, the value will be the number of
+    samples available (otherwise it will be 1 or 0).
+    */
+    pub fn samples_available(&self) -> u32 {
+        unsafe {
+            lsl_samples_available(self.handle) as u32
+        }
+    }
+
+    /**
+    Query whether the clock was potentially reset since the last call to `was_clock_reset()`.
+
+    This is a rarely-used function that is only useful to applications that combine multiple
+    `time_correction` values to estimate precise clock drift; it allows to tolerate cases where
+    the machine from which the stream is coming was hot-swapped or restarted in between two
+    measurements.
+    */
+    pub fn was_clock_reset(&self) -> bool {
+        unsafe {
+            lsl_was_clock_reset(self.handle) != 0
+        }
+    }
+
+    /**
+    Override the half-time (forget factor) of the time-stamp smoothing.
+
+    The default is 90 seconds unless a different value is set in the config file. Using a longer
+    window will yield lower jitter in the time stamps, but longer windows will have trouble
+    tracking changes in the clock rate (usually due to temperature changes); the default is able
+    to track changes up to 10 degrees C per minute sufficiently well.
+    */
+    pub fn smoothing_halftime(&self, value: f32) {
+        unsafe {
+            lsl_smoothing_halftime(self.handle, value as f32);
+        }
+    }
+
 }
 
 impl Drop for StreamInlet {
@@ -1088,6 +1271,7 @@ impl Drop for StreamInlet {
         }
     }
 }
+
 
 
 // helper functions for interop with native data types in the lsl_sys module
