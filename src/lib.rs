@@ -25,6 +25,7 @@ via the low-level/raw `lsl-sys` crate.
 use lsl_sys::*;
 use std::ffi;
 use std::fmt;
+use std::vec;
 use std::convert::TryFrom;
 
 mod utils;  // TODO: we can prob remove this
@@ -180,7 +181,7 @@ pub fn local_clock() -> f64 {
 // ==========================
 
 /**
-The StreamInfo object stores the declaration of a data stream.
+The `StreamInfo` object stores the declaration of a data stream.
 
 It represents the following information:
 * stream data format (number of channels, channel format)
@@ -189,15 +190,19 @@ It represents the following information:
 
 Whenever a program wants to provide a new stream on the lab network it will typically first
 create a `StreamInfo` to describe its properties and then construct a `StreamOutlet` with it to
-create the stream on the network. The stream can then be discovered based on any of its meta-data,
-and recipients who discover the stream on the network can then query the full stream information.
-The information herein is also typically written to disk when recording the stream (playing a
-similar role as a file header).
+create the stream on the network.
+
+The stream can then be discovered based on any of its meta-data, and recipients who discover the
+stream on the network can then query the full stream information.
+
+The content of the `StreamInfo` encompasses all the static information that is known up-front about
+a data stream, and therefore, anything you would expect to find in a file header for a streaming
+data file should be written into the stream info (in fact, if you use a tool to record one or more
+streams into an `XDF` file, the stream info goes into the file header.
 */
 pub struct StreamInfo {
     handle: lsl_streaminfo,
 }
-
 
 impl StreamInfo {
     /** Construct a new `StreamInfo` object.
@@ -228,7 +233,7 @@ impl StreamInfo {
     pub fn new(stream_name: &str, stream_type: &str, channel_count: u32, nominal_srate: f64,
                channel_format: ChannelFormat, source_id: &str) -> Result<StreamInfo>
     {
-        if stream_name.is_empty() || nominal_srate < 0.0 {
+        if stream_name.is_empty() || nominal_srate < 0.0 || channel_count >= 0x80000000 {
             return Err(Error::BadArgument)
         }
         let stream_name = ffi::CString::new(stream_name)?;
@@ -458,7 +463,6 @@ impl StreamInfo {
 
     /// Get the native implementation handle.
     pub fn native_handle(&self) -> lsl_streaminfo {
-        //assert_ne!(self.handle, std::ptr::null);
         self.handle
     }
 
@@ -491,7 +495,6 @@ impl StreamInfo {
     }
 }
 
-
 impl Drop for StreamInfo {
     fn drop(&mut self) {
         unsafe {
@@ -499,7 +502,6 @@ impl Drop for StreamInfo {
         }
     }
 }
-
 
 impl Clone for StreamInfo {
     fn clone(&self) -> StreamInfo {
@@ -549,14 +551,16 @@ impl StreamOutlet {
        value here to avoid running out of RAM in case data have to be buffered unexpectedly.
     */
     pub fn new(info: &StreamInfo, chunk_size: i32, max_buffered: i32) -> Result<StreamOutlet> {
+        let channel_count = info.channel_count() as usize;
+        let nominal_rate = info.nominal_srate();
+        if chunk_size < 0 || max_buffered < 0 || channel_count >= 0x80000000 || nominal_rate < 0.0 {
+            return Err(Error::BadArgument);
+        }
         unsafe {
-            if chunk_size < 0 || max_buffered < 0 {
-                return Err(Error::BadArgument);
-            }
             let handle = lsl_create_outlet(
-                info.native_handle(), chunk_size as i32, max_buffered as i32);
-            let channel_count = info.channel_count() as usize;
-            let nominal_rate = info.nominal_srate();
+                info.native_handle(),
+                chunk_size as i32,
+                max_buffered as i32);
             match handle.is_null() {
                 false => Ok(StreamOutlet { handle, channel_count, nominal_rate }),
                 true => Err(Error::ResourceCreation),
@@ -623,18 +627,17 @@ See also the `ExPushable` trait for the extended-argument versions of these meth
 `push_sample_ex<T>()` and `push_chunk_ex<T>()`.
 
 Note: while these methods can technically fail, this is rare and would only happen if arguments
-were malformed, in case of an OS error (e.g., out of memory) or a buggy native library.
+were malformed, or in the event of an OS error (e.g., out of memory) or a buggy native library.
 */
 pub trait Pushable<T> {
     /**
-    Push a vector of values of some type as a sample into the outlet.
-    Each entry in the vector corresponds to one channel. The function handles type checking &
-    conversion.
+    Push a vector of values of some type as a sample into the outlet. Each entry in the vector
+    corresponds to one channel. The function handles type checking & conversion.
 
     The data are time-stamped with the current time (using `local_clock()`), and immediately
     transmitted (unless a `chunk_size` was provided at outlet construction, which overrides in what
     granularity data are transmitted). See also `push_chunk_ex()` (provided by `ExPushable` trait)
-    for a variant that allows for overriding the timestamp and implicit push-through (queue flush)
+    for a variant that allows for overriding the timestamp and implicit push-through (flush)
     behavior.
     */
     fn push_sample(&self, data: &T) -> Result<()>;
@@ -648,9 +651,9 @@ pub trait Pushable<T> {
     transmitted (unless a `chunk_size` was provided at outlet construction, which causes the data
     to be internally re-aggregated into chunks of that specified size for transmission). See also
     `push_chunk_ex()` (provided by `ExPushable` trait) for a variant that allows for overriding the
-    timestamp and implicit push-through (queue flush) behavior.
+    timestamp and implicit push-through (flush) behavior.
     */
-    fn push_chunk(&self, data: &std::vec::Vec<T>) -> Result<()>;
+    fn push_chunk(&self, data: &vec::Vec<T>) -> Result<()>;
 
     /**
     Push a chunk of samples (batched into a `Vec`) along with a separate time stamp for each
@@ -665,20 +668,21 @@ pub trait Pushable<T> {
     specified size for ttransmission). See also `push_chunk_ex()` (provided by `ExPushable` trait)
     for a variant that allows for overriding this behavior.
     */
-    fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>) -> Result<()>;
+    fn push_chunk_stamped(&self, samples: &vec::Vec<T>, stamps: &vec::Vec<f64>) -> Result<()>;
 }
 
 // Pushable is basically a convenience layer on top of ExPushable
 impl<T, U: ExPushable<T>> Pushable<T> for U {
     fn push_sample(&self, data: &T) -> Result<()> {
-        self.push_sample_ex(data, 0.0, true)
+        self.push_sample_ex(data, 0.0,
+                            true)
     }
 
-    fn push_chunk(&self, data: &std::vec::Vec<T>) -> Result<()> {
+    fn push_chunk(&self, data: &vec::Vec<T>) -> Result<()> {
         self.push_chunk_ex(data, 0.0, true)
     }
 
-    fn push_chunk_stamped(&self, samples: &std::vec::Vec<T>, stamps: &std::vec::Vec<f64>) -> Result<()> {
+    fn push_chunk_stamped(&self, samples: &vec::Vec<T>, stamps: &vec::Vec<f64>) -> Result<()> {
         self.push_chunk_stamped_ex(samples, stamps, true)
     }
 }
@@ -727,7 +731,7 @@ pub trait ExPushable<T>: HasNominalRate {
     See also `push_chunk()` for a simpler variant with default values for `timestamp` and
     `pushthrough` (defined in `Pushable` trait).
     */
-    fn push_chunk_ex(&self, samples: &std::vec::Vec<T>, timestamp: f64, pushthrough: bool) -> Result<()> {
+    fn push_chunk_ex(&self, samples: &vec::Vec<T>, timestamp: f64, pushthrough: bool) -> Result<()> {
         if !samples.is_empty() {
             let mut timestamp = if timestamp == 0.0 { local_clock() } else { timestamp };
             let srate = self.nominal_srate();
@@ -758,7 +762,7 @@ pub trait ExPushable<T>: HasNominalRate {
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
     */
-    fn push_chunk_stamped_ex(&self, samples: &std::vec::Vec<T>, timestamps: &std::vec::Vec<f64>, pushthrough: bool) -> Result<()> {
+    fn push_chunk_stamped_ex(&self, samples: &vec::Vec<T>, timestamps: &vec::Vec<f64>, pushthrough: bool) -> Result<()> {
         assert_eq!(samples.len(), timestamps.len());
         let max_k = samples.len()-1;
         // send all except last sample
@@ -776,68 +780,74 @@ pub trait ExPushable<T>: HasNominalRate {
 // LSL outlets do type conversion to the defined channel format on push (even numbers to string
 // if so desired), so we can safely add all push_sample_ex() overloads (n.b. except from string to
 // number if the string doesn't actually represent a number, then the sample will be dropped)
-impl ExPushable<std::vec::Vec<f32>> for StreamOutlet {
-    fn push_sample_ex(&self, data: &std::vec::Vec<f32>, timestamp: f64, pushthrough: bool) -> Result<()> {
+impl ExPushable<vec::Vec<f32>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<f32>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
         unsafe {
-            ec_to_result(lsl_push_sample_ftp(self.handle,data.as_ptr(), timestamp, pushthrough as i32))?;
+            ec_to_result(lsl_push_sample_ftp(self.handle,data.as_ptr(), timestamp,
+                                                 pushthrough as i32))?;
         }
         Ok(())
     }
 }
 
-impl ExPushable<std::vec::Vec<f64>> for StreamOutlet {
-    fn push_sample_ex(&self, data: &std::vec::Vec<f64>, timestamp: f64, pushthrough: bool) -> Result<()> {
+impl ExPushable<vec::Vec<f64>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<f64>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
         unsafe {
-            ec_to_result(lsl_push_sample_dtp(self.handle,data.as_ptr(), timestamp, pushthrough as i32))?;
+            ec_to_result(lsl_push_sample_dtp(self.handle,data.as_ptr(), timestamp,
+                                                 pushthrough as i32))?;
         }
         Ok(())
     }
 }
 
-impl ExPushable<std::vec::Vec<i8>> for StreamOutlet {
-    fn push_sample_ex(&self, data: &std::vec::Vec<i8>, timestamp: f64, pushthrough: bool) -> Result<()> {
+impl ExPushable<vec::Vec<i8>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<i8>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
         unsafe {
-            ec_to_result(lsl_push_sample_ctp(self.handle,data.as_ptr(), timestamp, pushthrough as i32))?;
+            ec_to_result(lsl_push_sample_ctp(self.handle,data.as_ptr(), timestamp,
+                                                 pushthrough as i32))?;
         }
         Ok(())
     }
 }
 
-impl ExPushable<std::vec::Vec<i16>> for StreamOutlet {
-    fn push_sample_ex(&self, data: &std::vec::Vec<i16>, timestamp: f64, pushthrough: bool) -> Result<()> {
+impl ExPushable<vec::Vec<i16>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<i16>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
         unsafe {
-            ec_to_result(lsl_push_sample_stp(self.handle,data.as_ptr(), timestamp, pushthrough as i32))?;
+            ec_to_result(lsl_push_sample_stp(self.handle,data.as_ptr(), timestamp,
+                                                 pushthrough as i32))?;
         }
         Ok(())
     }
 }
 
-impl ExPushable<std::vec::Vec<i32>> for StreamOutlet {
-    fn push_sample_ex(&self, data: &std::vec::Vec<i32>, timestamp: f64, pushthrough: bool) -> Result<()> {
+impl ExPushable<vec::Vec<i32>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<i32>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
         unsafe {
-            ec_to_result(lsl_push_sample_itp(self.handle,data.as_ptr(), timestamp, pushthrough as i32))?;
+            ec_to_result(lsl_push_sample_itp(self.handle,data.as_ptr(), timestamp,
+                                                 pushthrough as i32))?;
         }
         Ok(())
     }
 }
 
-impl ExPushable<std::vec::Vec<i64>> for StreamOutlet {
-    fn push_sample_ex(&self, data: &std::vec::Vec<i64>, timestamp: f64, pushthrough: bool) -> Result<()> {
+impl ExPushable<vec::Vec<i64>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<i64>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
         unsafe {
-            ec_to_result(lsl_push_sample_ltp(self.handle,data.as_ptr(), timestamp, pushthrough as i32))?;
+            ec_to_result(lsl_push_sample_ltp(self.handle,data.as_ptr(), timestamp,
+                                                 pushthrough as i32))?;
         }
         Ok(())
     }
 }
 
-impl ExPushable<std::vec::Vec<String>> for StreamOutlet {
-    fn push_sample_ex(&self, data: &std::vec::Vec<String>, timestamp: f64, pushthrough: bool) -> Result<()> {
+impl ExPushable<vec::Vec<String>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<String>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
         let ptrs: Vec<_> = data.iter().map(|x| {x.as_ptr()}).collect();
         let lens: Vec<_> = data.iter().map(|x| {u32::try_from(x.len()).unwrap()}).collect();
@@ -853,8 +863,8 @@ impl ExPushable<std::vec::Vec<String>> for StreamOutlet {
     }
 }
 
-impl ExPushable<std::vec::Vec<&str>> for StreamOutlet {
-    fn push_sample_ex(&self, data: &std::vec::Vec<&str>, timestamp: f64, pushthrough: bool) -> Result<()> {
+impl ExPushable<vec::Vec<&str>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<&str>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
         let ptrs: Vec<_> = data.iter().map(|x| {x.as_ptr()}).collect();
         let lens: Vec<_> = data.iter().map(|x| {u32::try_from(x.len()).unwrap()}).collect();
@@ -878,7 +888,7 @@ impl Drop for StreamOutlet {
     }
 }
 
-/// Exposes a sampling rate via the property nominal_srate().
+/// Exposes a sampling rate via the method nominal_srate().
 pub trait HasNominalRate {
     fn nominal_srate(&self) -> f64;
 }
@@ -912,7 +922,7 @@ Arguments:
 Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
 be used to open an inlet. The full info can be retrieved from the inlet if needed.
 */
-pub fn resolve_streams(wait_time: f64) -> Result<std::vec::Vec<StreamInfo>> {
+pub fn resolve_streams(wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
     // the fixed-size buffer is safe since the native function uses it as the max number of results
     let mut buffer = [0 as lsl_streaminfo; 1024];
     unsafe {
@@ -947,7 +957,7 @@ Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of whi
 be used to open an inlet. The full info can be retrieved from the inlet if needed. In case of a
 timeout, the result is *not* an `Error::Timeout` but instead an shorter or empty result vector.
 */
-pub fn resolve_byprop(prop: &str, value: &str, minimum: i32, wait_time: f64) -> Result<std::vec::Vec<StreamInfo>> {
+pub fn resolve_byprop(prop: &str, value: &str, minimum: i32, wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
     // the fixed-size buffer is safe since the native function uses it as the max number of results
     let mut buffer = [0 as lsl_streaminfo; 1024];
     let prop = ffi::CString::new(prop)?;
@@ -989,7 +999,7 @@ Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of whi
 be used to open an inlet. The full info can be retrieved from the inlet if needed. In case of a
 timeout, the result is *not* an `Error:Timeout` but instead an shorter or empty result vector.
 */
-pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> Result<std::vec::Vec<StreamInfo>> {
+pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
     // the fixed-size buffer is safe since the native function uses it as the max number of results
     let mut buffer = [0 as lsl_streaminfo; 1024];
     let pred = ffi::CString::new(pred)?;
@@ -1014,6 +1024,8 @@ pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> Result<std::v
 /**
 A stream inlet.
 Inlets are used to receive streaming data (and meta-data) from the lab network.
+
+The actual sample-pulling functionality is provided via the `Pullable` trait below.
 */
 pub struct StreamInlet {
     // internal fields used by the Rust wrapper
@@ -1047,13 +1059,13 @@ impl StreamInlet {
        due to an app or computer crash).
     */
     pub fn new(info: &StreamInfo, max_buflen: i32, max_chunklen: i32, recover: bool) -> Result<StreamInlet> {
-        if max_buflen < 0 || max_chunklen < 0 {
+        let channel_count = info.channel_count() as usize;
+        if max_buflen < 0 || max_chunklen < 0 || channel_count >= 0x80000000 {
             return Err(Error::BadArgument);
         }
-        let channel_count = info.channel_count() as usize;
         unsafe {
-            let handle = lsl_create_inlet(info.native_handle(), max_buflen, max_chunklen,
-                                                            recover as i32);
+            let handle = lsl_create_inlet(info.native_handle(), max_buflen,
+                                                            max_chunklen, recover as i32);
             match handle.is_null() {
                 false => Ok(StreamInlet { handle, channel_count }),
                 true => Err(Error::ResourceCreation),
@@ -1070,9 +1082,10 @@ impl StreamInlet {
 
     */
     pub fn info(&self, timeout: f64) -> Result<StreamInfo> {
+        let mut ec = [0 as i32];
         unsafe {
-            let mut ec = [0 as i32];
-            let handle = lsl_get_fullinfo(self.handle, timeout, ec.as_mut_ptr());
+            let handle = lsl_get_fullinfo(self.handle, timeout,
+                                                            ec.as_mut_ptr());
             ec_to_result(ec[0])?;
             match handle.is_null() {
                 false => Ok(StreamInfo::from_handle(handle)),
@@ -1132,11 +1145,8 @@ impl StreamInlet {
     within +/-0.2 ms).
 
     To get a measure of whether the network is well-behaved, see also the extended version
-    time_correction_ex(), which additionally returns the uncertainty (which maps to
-    round-trip-time).
-
-    Empirically, 0.2 ms a typical value for wired networks. 2 ms is typical of wireless networks.
-    The number can be much higher on poor networks.
+    `time_correction_ex()`, which additionally returns the round-trip-time, which is an upper bound
+    for the uncertainty.
 
     Arguments:
     * `timeout`: Timeout to acquire the first time-correction estimate. You can use the value
@@ -1163,16 +1173,18 @@ impl StreamInlet {
     /**
     Retrieve extended time-correction information for the given stream.
 
-    This function is used like `time_correction()`, but instead returns a tuple of 3 values,
-    which are (`time_offset`, `remote_time`, `uncertainty`), where:
+    This function is used like `time_correction()`, but instead returns additional information in
+    a tuple of 3 values, which are (`time_offset`, `remote_time`, `rtt`), where:
 
     * `time_offset` corresponds to the return value of `time_correction()` (see for explanation).
     * `remote_time` is the remote time when the measurement was made, and
-       consequently `remote_time - time_offset` is the local time when that measurement was made
-       (this will typically lie as much as a few seconds before the current time point, since the
-       function only returns the most recent measurement that was made).
-    * `uncertainty` is the round-trip-time of the measurement in seconds, which can be taken as
-       the standard deviation of the estimate.
+       consequently `remote_time + time_offset` is the local time when that measurement was made
+       (this will typically lie as much as a few seconds before the current time point -- not
+       because of inaccuracy, but because measurements are made periodically in the background,
+       and the function only returns the most recent one of them).
+    * `rtt` is the round-trip-time (RTT) of the measurement in seconds, which is a hard upper bound
+       on the uncertainty of the time offset. Empirically, 0.2 ms a typical RTT for wired networks,
+       2 ms is typical of wireless networks, but it can be much higher on poor networks.
     */
     pub fn time_correction_ex(&self, timeout: f64) -> Result<(f64, f64, f64)> {
         let mut ec = [0 as i32];
@@ -1206,11 +1218,11 @@ impl StreamInlet {
        previously set options.
     */
     pub fn set_postprocessing(&self, options: &[ProcessingOption]) {
+        let mut flags: u32 = 0;
+        for &opt in options {
+            flags |= opt as u32;
+        }
         unsafe {
-            let mut flags: u32 = 0;
-            for &opt in options {
-                flags |= opt as u32;
-            }
             let ec = lsl_set_postprocessing(self.handle, flags as u32);
             if let Err(kind) = ec_to_result(ec) {
                 // this should only happen in response to an unsupported flag being passed in,
@@ -1274,6 +1286,90 @@ impl Drop for StreamInlet {
 
 
 
+/**
+A trait that enables the methods `pull_sample<T>()` and `pull_chunk<T>()`.
+Implemented by StreamInlet.
+*/
+pub trait Pullable<T> {
+
+    /**
+    Pull the next successive sample from an inlet and read it into a vector of values.
+
+    Handles type checking & conversion. When using this function keep in mind that, if you do not
+    pick up values for a while or at a sufficiently fast rate, you will fall behind in the data
+    stream (up to a maximum of the inlet's `max_buflen` setting).
+
+    Arguments:
+    * `timeout`: The timeout for this operation, if any. If you use 0.0, the function will be
+       non-blocking. You can also use `lsl::FOREVER` to have no timeout.
+
+    Returns a tuple of `(sample, timestamp)`, where `sample` is a `Vec<T>` of values in the sample
+    (each value corresponds to one channel, assuming the stream is multi-channel), and `timestamp`
+    is the capture time of the sample on the remote side (e.g., remote machine). If no new sample
+    was available, the sample vector will be empty and the timestamp will be 0.0 i.e., it will
+    *not* return an `Error::Timeout` since we consider this a normal behavior.
+
+
+    If you want to remap the time stamp to the local machine's clock, you can enable the clock
+    synchronization option on the inlet using the `set_postprocessing()` method. Alternatively that
+    can also be done manually by adding the return values of inlet's `time_correction()` method.
+
+    This can return an `Error::StreamLost` if the stream source has been lost (see also `recover`
+    option in inlet constructor for details).
+    */
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<T>, f64)>;
+
+    /**
+    Pull a chunk of new samples and their time stamps from the inlet.
+
+    This will return *all* new samples that you have not yet picked up since your last call (i.e.,
+    it can be anywhere between empty or a few-minute stretch).
+
+    Note You can configure the maximum amount of buffered data via the `max_buflen` setting on the
+    inlet -- if you allow data to accomulate beyond this amount, the oldest data samples will be
+    discarded (for real-time processing applications it can make sense to set a low limit to avoid
+    wasting resources, while for recording applications, a high limit is recommended).
+
+    This can return an `Error::StreamLost` if the stream source has been lost (see also `recover`
+    option in inlet constructor for details).
+    */
+    fn pull_chunk(&self) -> Result<(vec::Vec<vec::Vec<T>>, vec::Vec<f64>)> {
+        let mut samples: vec::Vec<vec::Vec<T>> = vec![];
+        let mut stamps: vec::Vec<f64> = vec![];
+        loop {
+            let (sample, stamp) = self.pull_sample(0.0)?;
+            if stamp != 0.0 {
+                samples.push(sample);
+                stamps.push(stamp);
+            } else {
+                break // no more data
+            }
+        }
+        Ok((samples, stamps))
+    }
+}
+
+impl Pullable<f32> for StreamInlet {
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f32>, f64)> {
+        let mut ec = [0 as i32];
+        let mut result = vec![0.0 as f32; self.channel_count];
+        unsafe {
+            let ts = lsl_pull_sample_f(
+                self.handle,
+                result.as_mut_ptr(),
+                result.len() as i32,
+                timeout,
+                ec.as_mut_ptr());
+            ec_to_result(ec[0])?;
+            if ts == 0.0 {
+                result.clear();
+            }
+            Ok((result, ts))
+        }
+    }
+}
+
+
 // helper functions for interop with native data types in the lsl_sys module
 impl ChannelFormat {
     /// Convert to corresponding native data type.
@@ -1301,7 +1397,8 @@ impl ChannelFormat {
             lsl_channel_format_t_cft_int16 => ChannelFormat::Int16,
             lsl_channel_format_t_cft_int8 => ChannelFormat::Int8,
             lsl_channel_format_t_cft_int64 => ChannelFormat::Int64,
-            // Note that this will convert any unknown values that come ouf of the lib into Undefined
+            // Note that this will convert any unknown values that come ouf of the lib
+            // into Undefined
             _ => ChannelFormat::Undefined
         }
     }
@@ -1313,6 +1410,26 @@ impl ChannelFormat {
 impl From<ffi::NulError> for Error {
     fn from(_: ffi::NulError) -> Error {
         Error::BadArgument
+    }
+}
+
+impl fmt::Display for Error {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Write strictly the first element into the supplied output
+        // stream: `f`. Returns `fmt::Result` which indicates whether the
+        // operation succeeded or failed. Note that `write!` uses syntax which
+        // is very similar to `println!`.
+        let msg = match self {
+            Error::Timeout => "The operation has timed out.",
+            Error::StreamLost => "The stream has been lost; to continue reading, you need to \
+                                  re-resolve it.",
+            Error::BadArgument => "An function argument was incorrectly specified.",
+            Error::ResourceCreation => "Resource creation failed.",
+            Error::Internal => "An internal error has occurred.",
+            Error::Unknown => "An unknown error has occurred."
+        };
+        write!(f, "{}", msg)
     }
 }
 
@@ -1330,24 +1447,5 @@ fn ec_to_result(ec: i32) -> Result<i32> {
         }
     } else {
         Ok(ec)
-    }
-}
-
-impl fmt::Display for Error {
-    // This trait requires `fmt` with this exact signature.
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
-        let msg = match self {
-            Error::Timeout => "The operation has timed out.",
-            Error::StreamLost => "The stream has been lost; to continue reading, you need to re-resolve it.",
-            Error::BadArgument => "An function argument was incorrectly specified.",
-            Error::ResourceCreation => "Resource creation failed.",
-            Error::Internal => "An internal error has occurred.",
-            Error::Unknown => "An unknown error has occurred."
-        };
-        write!(f, "{}", msg)
     }
 }

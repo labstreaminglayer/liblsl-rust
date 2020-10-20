@@ -1,4 +1,5 @@
-use lsl::*;
+use lsl;
+use lsl::Pushable;
 
 use std::vec;
 use rand::Rng;
