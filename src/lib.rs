@@ -451,7 +451,8 @@ impl StreamInfo {
 
     /// Construct a blank `StreamInfo`.
     pub fn from_blank() -> StreamInfo {
-        StreamInfo::new("untitled", "", 0, 0.0, ChannelFormat::Undefined, "").unwrap()
+        StreamInfo::new("untitled", "", 0, 0.0,
+                        ChannelFormat::Undefined, "").unwrap()
     }
 
     /// Create a `StreamInfo` from an XML string.
@@ -565,6 +566,8 @@ impl StreamOutlet {
 
     /**
     Wait until some consumer shows up (without wasting resources).
+
+    To have no timeout, you can use the value `lsl::FOREVER` here.
     Returns True if the wait was successful, false if the timeout expired.
     */
     pub fn wait_for_consumers(&self, timeout: f64) -> bool {
@@ -582,8 +585,8 @@ impl StreamOutlet {
         unsafe {
             let info_handle = lsl_get_info(self.handle);
             match info_handle.is_null() {
-                // this handle already refers to a copy the outlet's info object so the transfer is
-                // lightweight
+                // the handle already refers to a copy the outlet's info object so this operation
+                // is trivial
                 false => Ok(StreamInfo::from_handle(info_handle)),
                 true => Err("Could not obtain stream info for this outlet.")
             }
@@ -902,10 +905,10 @@ Arguments:
 * `value`: The string value that the property should have (e.g., "EEG" as the type property).
 * `minimum`: Return at least this number of streams.
 * `timeout`: A timeout for the operation, in seconds. If the timeout expires, less than the desired
-   number of streams (possibly none) will be returned. You could use the value `lsl::FOREVER` here,
-   or at least 1.0 to 2.0 seconds to allow for results to come in on a busy network. *Warning*: If
-   this is too short (<0.5s) only a subset (or none) of the outlets that are present on the network
-   may be returned.
+   number of streams (possibly none) will be returned. To have no timeout you can use the value
+   `lsl::FOREVER` here, otherwise use at least 1.0 to 2.0 seconds to allow for results to come in
+   on a busy network. *Warning*: If this is too short (<0.5s) only a subset (or none) of the
+   outlets that are present on the network may be returned.
 
 Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
 be used to open an inlet. The full info can be retrieved from the inlet if needed.
@@ -949,10 +952,10 @@ Arguments:
      `type='EEG' and starts-with(name,'BioSemi') and count(info/desc/channel)=32`
 * `minimum`: Return at least this many streams.
 * `timeout`: A timeout for the operation, in seconds. If the timeout expires, less than the desired
-   number of streams (possibly none) will be returned. You could use the value `lsl::FOREVER` here,
-   or at least 1.0 to 2.0 seconds to allow for results to come in on a busy network. *Warning*: If
-   this is too short (<0.5s) only a subset (or none) of the outlets that are present on the network
-   may be returned.
+   number of streams (possibly none) will be returned. To have no timeout you can use the value
+   `lsl::FOREVER` here, otherwise use at least 1.0 to 2.0 seconds to allow for results to come in
+   on a busy network. *Warning*: If this is too short (<0.5s) only a subset (or none) of the
+   outlets that are present on the network may be returned.
 
 Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
 be used to open an inlet. The full info can be retrieved from the inlet if needed.
@@ -974,6 +977,91 @@ pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> std::vec::Vec
         let results: Vec<_> = buffer[0..num_resolved].iter().map(
             |x| {StreamInfo::from_handle(*x)}).collect();
         results
+    }
+}
+
+
+// ======================
+// ==== Stream Inlet ====
+// ======================
+
+/**
+A stream inlet.
+Inlets are used to receive streaming data (and meta-data) from the lab network.
+*/
+pub struct StreamInlet {
+    // internal fields used by the Rust wrapper
+    handle: lsl_inlet,
+    channel_count: usize,
+}
+
+impl StreamInlet {
+    /**
+    Construct a new stream inlet from a resolved stream info.
+
+    Arguments:
+    * `info`: A resolved stream info object (as coming from one of the resolver functions).
+       Note: the `StreamInlet` may also be constructed with a manually-constructed `StreamInfo`, if
+       the desired channel format and count is already known up-front, but this is strongly
+       discouraged and should only ever be done if there is no time to resolve the stream up-front
+       (e.g., due to limitations in the client program).
+    * `max_buflen`: The maximum amount of data to buffer (in seconds if there is a nominal sampling
+       rate, otherwise x100 in samples). Recording applications want to use a fairly large buffer
+       size here (a good default would be 360, which corresponds to 6 minutes of data), while
+       real-time applications would only buffer as much as they need to perform their next
+       calculation (e.g., 1-10).
+    * `max_chunklen`: The maximum size, in samples, at which chunks are transmitted (the default
+       corresponds to the chunk sizes used by the sender). If specified as 0, the chunk sizes
+       preferred by the sender are used. Recording applications can use a generous size here
+       (leaving it to the network how to pack things), while real-time applications may want a
+       finer (perhaps 1-sample) granularity.
+    * `recover`: Try to silently recover lost streams that are recoverable (those that that
+       have a `source_id` set). In all other cases (`recover` is `false` or the stream is not
+       recoverable) inlet methods may throw a `LostError` if the stream's source is lost (e.g.,
+       due to an app or computer crash).
+    */
+    pub fn new(info: &StreamInfo, max_buflen: i32, max_chunklen: i32, recover: bool) -> Result<StreamInlet, &'static str> {
+        let channel_count = info.channel_count() as usize;
+        unsafe {
+            let handle = lsl_create_inlet(info.handle(), max_buflen, max_chunklen,
+                                          recover as i32);
+            match handle.is_null() {
+                false => Ok(StreamInlet { handle, channel_count }),
+                true => Err("Could not create inlet from provided StreamInfo."),
+            }
+        }
+    }
+
+    /**
+    Retrieve the complete information of the given stream, including the extended description.
+    Can be invoked at any time of the stream's lifetime.
+
+    Arguments:
+    * `timeout`: Timeout of the operation. You can use the value `lsl::FOREVER` to have no timeout.
+
+    */
+    pub fn info(&self, timeout: f64) -> Result<StreamInfo, &'static str> {
+        unsafe {
+            let mut ec = [0 as i32];
+            let handle = lsl_get_fullinfo(self.handle, timeout, ec.as_mut_ptr());
+            StreamInfo // TODO: finish
+            //check_error(ec);
+            //return stream_info(res);
+        }
+    }
+    // stream_info info(double timeout=FOREVER) { int32_t ec=0; lsl_streaminfo res = lsl_get_fullinfo(obj,timeout,&ec); check_error(ec); return stream_info(res); }
+    // int32_t ec=0; lsl_streaminfo res = lsl_get_fullinfo(obj,timeout,&ec); check_error(ec); return stream_info(res);
+
+}
+
+
+//    * `timeout_error` (if the timeout expires), or lost_error (if the stream source has been lost).
+
+impl Drop for StreamInlet {
+    fn drop(&mut self) {
+        unsafe {
+            lsl_destroy_inlet(self.handle);
+        }
     }
 }
 
@@ -1010,3 +1098,9 @@ impl ChannelFormat {
         }
     }
 }
+
+/*// Check an error code and translate into a Result
+fn check_error(ec: i32) -> Result<Ok, > {
+    Ok(Ok)
+}
+*/
