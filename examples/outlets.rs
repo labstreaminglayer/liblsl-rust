@@ -5,6 +5,26 @@ use std::vec;
 use rand::Rng;
 
 // send event markers
+fn send_blobs() {
+    println!("Declaring a new stream info...");
+    let info = lsl::StreamInfo::new(
+        "My Markers", "Blobs", 1, lsl::IRREGULAR_RATE,
+        lsl::ChannelFormat::String, "gogj45tg"
+    ).unwrap();
+
+    println!("Opening outlet...");
+    let outlet = lsl::StreamOutlet::new(&info, 0, 360).unwrap();
+
+    println!("Now streaming...");
+    let dur = std::time::Duration::from_millis(1000);
+    loop {
+        outlet.push_sample(&vec!("Hello Blob!".to_string())).expect("push_sample failed!");
+        std::thread::sleep(dur);
+    }
+
+}
+
+// send event markers
 fn send_markers() {
     println!("Declaring a new stream info...");
     let info = lsl::StreamInfo::new(
@@ -91,9 +111,10 @@ fn type_gymnastics() {
 
 
 fn main() {
-    send_markers();
-    send_data();
-    send_data_in_chunks();
-    type_gymnastics();
+    send_blobs();
+    //send_markers();
+//    send_data();
+  //  send_data_in_chunks();
+    //type_gymnastics();
 
 }

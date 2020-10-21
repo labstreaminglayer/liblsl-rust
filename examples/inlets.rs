@@ -45,7 +45,7 @@ fn receive_data() -> Result<(), lsl::Error> {
 }
 
 fn receive_markers() -> Result<(), lsl::Error> {
-    println!("Resolving EEG stream...");
+    println!("Resolving Marker stream...");
     let res = lsl::resolve_byprop("type", "Markers", 1, 5.0)?;
 
     if !res.is_empty() {
@@ -61,6 +61,31 @@ fn receive_markers() -> Result<(), lsl::Error> {
         println!("Reading data...");
         loop {
             let (sample, ts): (Vec<String>, _) = inl.pull_sample(lsl::FOREVER)?;
+            // this one definitely wins the ugliness contest
+            // let (sample, stamp) = Pullable::<f32>::pull_sample(&inl, 5.0)?;
+            println!("got {:?} at time {}", sample, ts);
+        }
+    }
+    Ok(())
+}
+
+fn receive_blobs() -> Result<(), lsl::Error> {
+    println!("Resolving Marker stream...");
+    let res = lsl::resolve_byprop("type", "Blobs", 1, 5.0)?;
+
+    if !res.is_empty() {
+        if res.len() > 1 {
+            println!("More than one stream found, opening first one...")
+        }
+        println!("Opening inlet...");
+        let inl = lsl::StreamInlet::new(&res[0], 360, 0, true)?;
+
+        // most of the following is not done by most applications
+        // show_stuff_inlet_can_do(&inl);
+
+        println!("Reading data...");
+        loop {
+            let (sample, ts): (Vec<Vec<u8>>, _) = inl.pull_sample(lsl::FOREVER)?;
             // this one definitely wins the ugliness contest
             // let (sample, stamp) = Pullable::<f32>::pull_sample(&inl, 5.0)?;
             println!("got {:?} at time {}", sample, ts);
@@ -87,7 +112,7 @@ fn receive_data_chunks() -> Result<(), lsl::Error> {
         println!("Reading data...");
         let dur = std::time::Duration::from_millis(300);
         loop {
-            let (samples, stamps): (Vec<Vec<String>>, _) = inl.pull_chunk()?;
+            let (samples, stamps): (Vec<Vec<f32>>, _) = inl.pull_chunk()?;
             for k in 0..samples.len() {
                 println!("got {:?} at time {}", samples[k], stamps[k]);
             }
@@ -99,7 +124,8 @@ fn receive_data_chunks() -> Result<(), lsl::Error> {
 }
 
 fn main() {
-    receive_markers().expect("Receive markers failed.");
-    receive_data_chunks().expect("receive data in chunks failed.");
-    //receive_data().expect("Receive data failed.")
+    receive_blobs().expect("Receive markers failed.");
+    //receive_markers().expect("Receive markers failed.");
+    //receive_data().expect("Receive data failed.");
+    //receive_data_chunks().expect("receive data in chunks failed.");
 }

@@ -535,7 +535,6 @@ pub struct StreamOutlet {
     nominal_rate: f64,
 }
 
-
 impl StreamOutlet {
     /**
     Establish a new stream outlet. This makes the stream discoverable.
@@ -611,11 +610,63 @@ impl StreamOutlet {
         }
     }
 
+
+    // --- internal methods ---
+
     // Internal utility function that checks whether a given length value matches the channel count
     fn assert_len(&self, len: usize) {
         // we use assert since that's almost surely a sign of a fatal application bug
         assert_eq!(len, self.channel_count, "StreamOutlet received data whose length {} does not \
                    match the outlet's channel count {}", len, self.channel_count);
+    }
+
+    /*
+    Internal helper to implement `push_sample()` for numeric value types.
+
+    Arguments:
+    * `func`: the native FFI function to call to push a sample
+    * `data`: A vector of values to push (one for each channel).
+    * `timestamp`: Optionally the capture time of the sample, in agreement with `local_clock()`;
+       if passed as 0.0, the current time is used.
+    * `pushthrough`: Whether to push the sample through to the receivers instead of buffering it
+       with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
+       specified at outlet construction, takes precedence over the pushthrough flag.
+    */
+    fn safe_push_numeric<T>(&self, func: NativePushFunction<T>, data: &vec::Vec<T>, timestamp: f64,
+                            pushthrough: bool) -> Result<()> {
+        self.assert_len(data.len());
+        unsafe {
+            ec_to_result(func(self.handle, data.as_ptr(), timestamp, pushthrough as i32))?;
+        }
+        Ok(())
+    }
+
+    /*
+    Internal helper to implement `push_sample()` for value types that can be converted to `&[u8]`
+    byte slices via `.as_ref()`.
+
+    Arguments:
+    * `data`: A vector of values to push (one for each channel).
+    * `timestamp`: Optionally the capture time of the sample, in agreement with `local_clock()`;
+       if passed as 0.0, the current time is used.
+    * `pushthrough`: Whether to push the sample through to the receivers instead of buffering it
+       with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
+       specified at outlet construction, takes precedence over the pushthrough flag.
+    */
+    fn safe_push_blob<T: AsRef<[u8]>>(&self, data: &vec::Vec<T>, timestamp: f64,
+                                      pushthrough: bool) -> Result<()> {
+        self.assert_len(data.len());
+        let ptrs: Vec<_> = data.iter().map(|x| {x.as_ref().as_ptr()}).collect();
+        let lens: Vec<_> = data.iter().map(|x| {u32::try_from(x.as_ref().len()).unwrap()}).collect();
+        unsafe {
+            ec_to_result(lsl_push_sample_buftp(
+                self.handle,
+                ptrs.as_ptr() as *mut *const std::os::raw::c_char,
+                lens.as_ptr(),
+                timestamp,
+                pushthrough as i32))?;
+        }
+        Ok(())
     }
 }
 
@@ -777,111 +828,58 @@ pub trait ExPushable<T>: HasNominalRate {
     }
 }
 
-// TODO: use a safe_push here too
-//       and a safe_push_buf or so for String, str, Vec<u8>
-//       also maybe tokio's bytes as an optional feature
-
-// LSL outlets do type conversion to the defined channel format on push (even numbers to string
-// if so desired), so we can safely add all push_sample_ex() overloads (n.b. except from string to
-// number if the string doesn't actually represent a number, then the sample will be dropped)
 impl ExPushable<vec::Vec<f32>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<f32>, timestamp: f64, pushthrough: bool) -> Result<()> {
-        self.assert_len(data.len());
-        unsafe {
-            ec_to_result(lsl_push_sample_ftp(self.handle,data.as_ptr(), timestamp,
-                                                 pushthrough as i32))?;
-        }
-        Ok(())
+        self.safe_push_numeric(lsl_push_sample_ftp, data, timestamp, pushthrough)
     }
 }
 
 impl ExPushable<vec::Vec<f64>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<f64>, timestamp: f64, pushthrough: bool) -> Result<()> {
-        self.assert_len(data.len());
-        unsafe {
-            ec_to_result(lsl_push_sample_dtp(self.handle,data.as_ptr(), timestamp,
-                                                 pushthrough as i32))?;
-        }
-        Ok(())
+        self.safe_push_numeric(lsl_push_sample_dtp, data, timestamp, pushthrough)
     }
 }
 
 impl ExPushable<vec::Vec<i8>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<i8>, timestamp: f64, pushthrough: bool) -> Result<()> {
-        self.assert_len(data.len());
-        unsafe {
-            ec_to_result(lsl_push_sample_ctp(self.handle,data.as_ptr(), timestamp,
-                                                 pushthrough as i32))?;
-        }
-        Ok(())
+        self.safe_push_numeric(lsl_push_sample_ctp, data, timestamp, pushthrough)
     }
 }
 
 impl ExPushable<vec::Vec<i16>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<i16>, timestamp: f64, pushthrough: bool) -> Result<()> {
-        self.assert_len(data.len());
-        unsafe {
-            ec_to_result(lsl_push_sample_stp(self.handle,data.as_ptr(), timestamp,
-                                                 pushthrough as i32))?;
-        }
-        Ok(())
+        self.safe_push_numeric(lsl_push_sample_stp, data, timestamp, pushthrough)
     }
 }
 
 impl ExPushable<vec::Vec<i32>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<i32>, timestamp: f64, pushthrough: bool) -> Result<()> {
-        self.assert_len(data.len());
-        unsafe {
-            ec_to_result(lsl_push_sample_itp(self.handle,data.as_ptr(), timestamp,
-                                                 pushthrough as i32))?;
-        }
-        Ok(())
+        self.safe_push_numeric(lsl_push_sample_itp, data, timestamp, pushthrough)
     }
 }
 
 #[cfg(not(windows))] // TODO: once we upgrade to liblsl 1.14, we can drop this platform restriction
 impl ExPushable<vec::Vec<i64>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<i64>, timestamp: f64, pushthrough: bool) -> Result<()> {
-        self.assert_len(data.len());
-        unsafe {
-            ec_to_result(lsl_push_sample_ltp(self.handle,data.as_ptr(), timestamp,
-                                                 pushthrough as i32))?;
-        }
-        Ok(())
+        self.safe_push_numeric(lsl_push_sample_ltp, data, timestamp, pushthrough)
     }
 }
 
 impl ExPushable<vec::Vec<String>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<String>, timestamp: f64, pushthrough: bool) -> Result<()> {
-        self.assert_len(data.len());
-        let ptrs: Vec<_> = data.iter().map(|x| {x.as_ptr()}).collect();
-        let lens: Vec<_> = data.iter().map(|x| {u32::try_from(x.len()).unwrap()}).collect();
-        unsafe {
-            ec_to_result(lsl_push_sample_buftp(
-                self.handle,
-                ptrs.as_ptr() as *mut *const std::os::raw::c_char,
-                lens.as_ptr(),
-                timestamp,
-                pushthrough as i32))?;
-        }
-        Ok(())
+        self.safe_push_blob(data, timestamp, pushthrough)
     }
 }
 
 impl ExPushable<vec::Vec<&str>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<&str>, timestamp: f64, pushthrough: bool) -> Result<()> {
-        self.assert_len(data.len());
-        let ptrs: Vec<_> = data.iter().map(|x| {x.as_ptr()}).collect();
-        let lens: Vec<_> = data.iter().map(|x| {u32::try_from(x.len()).unwrap()}).collect();
-        unsafe {
-            ec_to_result(lsl_push_sample_buftp(
-                self.handle,
-                ptrs.as_ptr() as *mut *const std::os::raw::c_char,
-                lens.as_ptr(),
-                timestamp,
-                pushthrough as i32))?;
-        }
-        Ok(())
+        self.safe_push_blob(data, timestamp, pushthrough)
+    }
+}
+
+impl ExPushable<vec::Vec<&[u8]>> for StreamOutlet {
+    fn push_sample_ex(&self, data: &vec::Vec<&[u8]>, timestamp: f64, pushthrough: bool) -> Result<()> {
+        self.safe_push_blob(data, timestamp, pushthrough)
     }
 }
 
@@ -1025,10 +1023,6 @@ pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> Result<vec::V
 // ======================
 // ==== Stream Inlet ====
 // ======================
-
-// internal signature of one of the lsl_pull_sample* functions
-type NativePullFunction<T> = unsafe extern "C" fn(*mut lsl_inlet_struct_, *mut T, i32, f64, *mut i32) -> f64;
-
 
 /**
 A stream inlet.
@@ -1285,8 +1279,9 @@ impl StreamInlet {
 
     // --- internal methods ---
 
-    /**
-    Internal helper to implement `pull_sample()` for numeric value types.
+    /*
+    Internal helper to implement `pull_sample()` safely for numeric value types, given a native
+    function to do the actual job.
 
     Arguments:
     * `func`: the native FFI function to call to pull a sample
@@ -1310,12 +1305,12 @@ impl StreamInlet {
         }
     }
 
-    /**
+    /*
     Internal helper to implement `pull_sample()` for types that can be be created from a
     `&[u8]` slice of bytes.
 
     Arguments:
-    * `mapper`: a function that converts from `&[u8]` to an owned copy in the type of interest.
+    * `mapper`: a function that converts a `&[u8]` to an owned copy of type `T`.
     * `timeout`: the timeout to pass to the native function
     */
     fn safe_pull_blob<T: Clone>(&self, mapper: fn(&[u8]) -> T, timeout: f64) -> Result<(vec::Vec<T>, f64)> {
@@ -1419,52 +1414,61 @@ pub trait Pullable<T> {
 
 impl Pullable<f32> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f32>, f64)> {
-        self.safe_pull_numeric::<f32>(lsl_pull_sample_f, timeout)
+        self.safe_pull_numeric(lsl_pull_sample_f, timeout)
     }
 }
 
 impl Pullable<f64> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f64>, f64)> {
-        self.safe_pull_numeric::<f64>(lsl_pull_sample_d, timeout)
+        self.safe_pull_numeric(lsl_pull_sample_d, timeout)
     }
 }
 
 #[cfg(not(windows))] // TODO: once we upgrade to liblsl 1.14, we can drop this platform restriction
 impl Pullable<i64> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i64>, f64)> {
-        self.safe_pull_numeric::<i64>(lsl_pull_sample_l, timeout)
+        self.safe_pull_numeric(lsl_pull_sample_l, timeout)
     }
 }
 
 impl Pullable<i32> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i32>, f64)> {
-        self.safe_pull_numeric::<i32>(lsl_pull_sample_i, timeout)
+        self.safe_pull_numeric(lsl_pull_sample_i, timeout)
     }
 }
 
 impl Pullable<i16> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i16>, f64)> {
-        self.safe_pull_numeric::<i16>(lsl_pull_sample_s, timeout)
+        self.safe_pull_numeric(lsl_pull_sample_s, timeout)
     }
 }
 
 impl Pullable<i8> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i8>, f64)> {
-        self.safe_pull_numeric::<i8>(lsl_pull_sample_c, timeout)
+        self.safe_pull_numeric(lsl_pull_sample_c, timeout)
     }
 }
 
 impl Pullable<String> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<String>, f64)> {
-        self.safe_pull_blob::<String>(|x| { String::from_utf8_lossy(x).into_owned() }, timeout)
+        self.safe_pull_blob(|x| { String::from_utf8_lossy(x).into_owned() }, timeout)
     }
 }
 
 impl Pullable<vec::Vec<u8>> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<vec::Vec<u8>>, f64)> {
-        self.safe_pull_blob::<vec::Vec<u8>>(|x| { x.to_vec() }, timeout)
+        self.safe_pull_blob(|x| { x.to_vec() }, timeout)
     }
 }
+
+
+// === Internal details ===
+
+// internal signature of one of the lsl_push_sample_*tp functions
+type NativePushFunction<T> = unsafe extern "C" fn(*mut lsl_outlet_struct_, *const T, f64, i32) -> i32;
+
+// internal signature of one of the lsl_pull_sample_* functions
+type NativePullFunction<T> = unsafe extern "C" fn(*mut lsl_inlet_struct_, *mut T, i32, f64, *mut i32) -> f64;
 
 // helper functions for interop with native data types in the lsl_sys module
 impl ChannelFormat {
@@ -1500,15 +1504,14 @@ impl ChannelFormat {
     }
 }
 
-
-// === Error implementation ===
-
+// error type conversion
 impl From<ffi::NulError> for Error {
     fn from(_: ffi::NulError) -> Error {
         Error::BadArgument
     }
 }
 
+// human-readable error messages
 impl fmt::Display for Error {
     // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1529,8 +1532,8 @@ impl fmt::Display for Error {
     }
 }
 
-// Check whether a given value that may be an error code signals an error,
-// and convert to Err or Ok(value)
+// check whether a given value that may be an error code signals an error,
+// and convert to the correct Err() type or Ok(value) otherwise
 fn ec_to_result(ec: i32) -> Result<i32> {
     if ec < 0 {
         #[allow(non_upper_case_globals)]
