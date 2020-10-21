@@ -409,9 +409,9 @@ impl StreamInfo {
     can be specified here, as well. Meta-data recommendations follow the XDF file format project
     [here](https://github.com/sccn/xdf/wiki/Meta-Data) (or web search for: XDF meta-data).
 
-    **Important:** if you use a stream content type for which meta-data recommendations exist, please
-    try to lay out your meta-data in agreement with these recommendations for compatibility with
-    other applications.
+    **Important:** if you use a stream content type for which meta-data recommendations exist,
+    please try to lay out your meta-data in agreement with these recommendations for compatibility
+    with other applications.
     */
     pub fn desc(&self) -> XMLElement {
         unsafe {
@@ -671,8 +671,10 @@ impl StreamOutlet {
     fn safe_push_blob<T: AsRef<[u8]>>(&self, data: &vec::Vec<T>, timestamp: f64,
                                       pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
-        let ptrs: Vec<_> = data.iter().map(|x| {x.as_ref().as_ptr()}).collect();
-        let lens: Vec<_> = data.iter().map(|x| {u32::try_from(x.as_ref().len()).unwrap()}).collect();
+        let ptrs: Vec<_> = data.iter().map(
+            |x| {x.as_ref().as_ptr()}).collect();
+        let lens: Vec<_> = data.iter().map(
+            |x| {u32::try_from(x.as_ref().len()).unwrap()}).collect();
         unsafe {
             ec_to_result(lsl_push_sample_buftp(
                 self.handle,
@@ -797,7 +799,8 @@ pub trait ExPushable<T>: HasNominalRate {
     See also `push_chunk()` for a simpler variant with default values for `timestamp` and
     `pushthrough` (defined in `Pushable` trait).
     */
-    fn push_chunk_ex(&self, samples: &vec::Vec<T>, timestamp: f64, pushthrough: bool) -> Result<()> {
+    fn push_chunk_ex(&self, samples: &vec::Vec<T>, timestamp: f64,
+                     pushthrough: bool) -> Result<()> {
         if !samples.is_empty() {
             let mut timestamp = if timestamp == 0.0 { local_clock() } else { timestamp };
             let srate = self.nominal_srate();
@@ -828,7 +831,8 @@ pub trait ExPushable<T>: HasNominalRate {
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
     */
-    fn push_chunk_stamped_ex(&self, samples: &vec::Vec<T>, timestamps: &vec::Vec<f64>, pushthrough: bool) -> Result<()> {
+    fn push_chunk_stamped_ex(&self, samples: &vec::Vec<T>, timestamps: &vec::Vec<f64>,
+                             pushthrough: bool) -> Result<()> {
         assert_eq!(samples.len(), timestamps.len());
         let max_k = samples.len()-1;
         // send all except last sample
@@ -975,7 +979,8 @@ Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of whi
 be used to open an inlet. The full info can be retrieved from the inlet if needed. In case of a
 timeout, the result is *not* an `Error::Timeout` but instead an shorter or empty result vector.
 */
-pub fn resolve_byprop(prop: &str, value: &str, minimum: i32, wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
+pub fn resolve_byprop(prop: &str, value: &str, minimum: i32,
+                      wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
     // the fixed-size buffer is safe since the native function uses it as the max number of results
     let mut buffer = [0 as lsl_streaminfo; 1024];
     let prop = ffi::CString::new(prop)?;
@@ -1076,7 +1081,8 @@ impl StreamInlet {
        recoverable) inlet methods may throw a `LostError` if the stream's source is lost (e.g.,
        due to an app or computer crash).
     */
-    pub fn new(info: &StreamInfo, max_buflen: i32, max_chunklen: i32, recover: bool) -> Result<StreamInlet> {
+    pub fn new(info: &StreamInfo, max_buflen: i32, max_chunklen: i32,
+               recover: bool) -> Result<StreamInlet> {
         let channel_count = info.channel_count() as usize;
         if max_buflen < 0 || max_chunklen < 0 || channel_count >= 0x80000000 {
             return Err(Error::BadArgument);
@@ -1303,7 +1309,8 @@ impl StreamInlet {
     * `func`: the native FFI function to call to pull a sample
     * `timeout`: the timeout to pass in
     */
-    fn safe_pull_numeric<T: Clone + From<i8>>(&self, func: NativePullFunction<T>, timeout: f64) -> Result<(vec::Vec<T>, f64)> {
+    fn safe_pull_numeric<T: Clone + From<i8>>(&self, func: NativePullFunction<T>,
+                                              timeout: f64) -> Result<(vec::Vec<T>, f64)> {
         let mut ec = [0 as i32];
         let mut result = vec![T::from(0); self.channel_count];
         unsafe {
@@ -1329,7 +1336,8 @@ impl StreamInlet {
     * `mapper`: a function that converts a `&[u8]` to an owned copy of type `T`.
     * `timeout`: the timeout to pass to the native function
     */
-    fn safe_pull_blob<T: Clone>(&self, mapper: fn(&[u8]) -> T, timeout: f64) -> Result<(vec::Vec<T>, f64)> {
+    fn safe_pull_blob<T: Clone>(&self, mapper: fn(&[u8]) -> T,
+                                timeout: f64) -> Result<(vec::Vec<T>, f64)> {
         let mut ec = [0 as i32];
         let mut ptrs = vec![0 as *mut ::std::os::raw::c_char; self.channel_count];
         let mut lens = vec![0 as u32; self.channel_count];
@@ -1467,7 +1475,8 @@ impl Pullable<i8> for StreamInlet {
 
 impl Pullable<String> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<String>, f64)> {
-        self.safe_pull_blob(|x| { String::from_utf8_lossy(x).into_owned() }, timeout)
+        self.safe_pull_blob(|x| { String::from_utf8_lossy(x).into_owned() },
+                            timeout)
     }
 }
 
@@ -1572,7 +1581,8 @@ impl XMLElement {
         }
     }
 
-    /// Whether this is a text body (instead of an XML element). True both for plain char data and CData.
+    /// Whether this is a text body (instead of an XML element). True both for plain char
+    /// data and CData.
     pub fn is_text(&self) -> bool {
         unsafe {
             lsl_is_text(self.cursor) != 0
@@ -1611,21 +1621,27 @@ impl XMLElement {
 
     // === Modification ===
 
-    /// Append a child node with a given name, which has a (nameless) plain-text child with the given text value.
+    /// Append a child node with a given name, which has a (nameless) plain-text child with
+    /// the given text value.
     pub fn append_child_value(&self, name: &str, value: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
             let value = make_cstring(value);
-            XMLElement { cursor: lsl_append_child_value(self.cursor, name.as_ptr(), value.as_ptr()) }
+            XMLElement { cursor: lsl_append_child_value(self.cursor,
+                                                        name.as_ptr(),
+                                                        value.as_ptr()) }
         }
     }
 
-    /// Prepend a child node with a given name, which has a (nameless) plain-text child with the given text value.
+    /// Prepend a child node with a given name, which has a (nameless) plain-text child with
+    /// the given text value.
     pub fn prepend_child_value(&self, name: &str, value: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
             let value = make_cstring(value);
-            XMLElement { cursor: lsl_prepend_child_value(self.cursor, name.as_ptr(), value.as_ptr()) }
+            XMLElement { cursor: lsl_prepend_child_value(self.cursor,
+                                                         name.as_ptr(),
+                                                         value.as_ptr()) }
         }
     }
 
@@ -1706,10 +1722,12 @@ impl XMLElement {
 // ========================
 
 // internal signature of one of the lsl_push_sample_*tp functions
-type NativePushFunction<T> = unsafe extern "C" fn(*mut lsl_outlet_struct_, *const T, f64, i32) -> i32;
+type NativePushFunction<T> = unsafe extern "C" fn(*mut lsl_outlet_struct_,
+                                                  *const T, f64, i32) -> i32;
 
 // internal signature of one of the lsl_pull_sample_* functions
-type NativePullFunction<T> = unsafe extern "C" fn(*mut lsl_inlet_struct_, *mut T, i32, f64, *mut i32) -> f64;
+type NativePullFunction<T> = unsafe extern "C" fn(*mut lsl_inlet_struct_,
+                                                  *mut T, i32, f64, *mut i32) -> f64;
 
 // helper functions for interop with native data types in the lsl_sys module
 impl ChannelFormat {
