@@ -1,5 +1,5 @@
 
-fn main() {
+fn main() -> Result<(), lsl::Error> {
     println!("Resolving streams...");
     let res = lsl::resolve_streams(2.0).unwrap();
     println!("Found {} streams:", res.len());
@@ -17,4 +17,15 @@ fn main() {
     println!("Resolving streams by {:?}...", pred);
     let res = lsl::resolve_bypred(pred, 1, 5.0).unwrap();
     println!("Found {} streams.", res.len());
+
+    println!("Launching a continuous resolver...");
+    let resolver = lsl::ContinuousResolver::new(5.0)?;
+    let dur = std::time::Duration::from_millis(100);
+    loop {
+        let list = resolver.results()?;
+        let names: Vec<_> = list.iter().map(|x| { x.stream_name() }).collect();
+        println!("Streams on the network: {:?}", names);
+        std::thread::sleep(dur);
+    }
+
 }

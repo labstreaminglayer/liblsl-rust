@@ -1494,9 +1494,18 @@ impl Pullable<vec::Vec<u8>> for StreamInlet {
 /**
 A lightweight XML element tree; models the `.desc()` field of `StreamInfo`.
 
-Has a name and can have multiple named children or have text content as value; attributes are
-omitted. *Tip:* The interface is modeled after a subset of pugixml's node type and is compatible
-with it. See also https://pugixml.org/docs/manual.html#access for additional documentation.
+An element has a name and can have multiple named children or have text content as value;
+attributes are omitted. Most operations return a node, which allows you to chain multiple operations.
+
+
+*Note:* In line with the behavior of the underlying native API, operations on non-existent nodes
+become safe no-ops instead of returning error variants or crashing. Since in most cases you will be
+writing data instead of navigating the tree and/or reading, this should be a rare occurrence in
+practice, but if needed, you can use the `is_valid()` operation to check the validity of the
+current element.
+
+*Tip:* The API  is modeled after a subset of pugixml's node type and is compatible with it. See
+also https://pugixml.org/docs/manual.html#access for additional documentation.
 
 Note: any strings passed into this function must be valid UTF8-encoded strings and contain no
 intermittent zero bytes.
@@ -1714,6 +1723,149 @@ impl XMLElement {
             lsl_remove_child_n(self.cursor, name.as_ptr());
         }
     }
+
+    /// Returns true if the current node is valid, false otherwise
+    pub fn is_valid(&self) -> bool {
+        !self.cursor.is_null()
+    }
+}
+
+// =============================
+// ==== Continuous Resolver ====
+// =============================
+
+/**
+A convenience class that resolves streams continuously in the background.
+
+This object can be queried at any time for the set of streams that are currently visible on the
+network.
+*/
+pub struct ContinuousResolver {
+    handle: lsl_continuous_resolver,
+}
+
+impl ContinuousResolver {
+    /**
+    Construct a new continuous_resolver that resolves all streams on the network.
+
+    This is analogous to the functionality offered by the free function `resolve_streams()`.
+
+    Arguments:
+    * `forget_after` When a stream is no longer visible on the network (e.g., because it was
+       shut down), this is the time in seconds after which it is no longer reported by the
+       resolver. A good value here is 5.0 to report any stream that had been visible in the last
+       5 seconds.
+
+    This can return an `Error::BadArgument` or an `Error::ResourceCreation` in case resource
+    creation fails, which would be most likely due to resource exhaustion at the OS level (e.g.,
+    out of memory or possibly out of socket handles / ports).
+    */
+    pub fn new(forget_after: f64) -> Result<ContinuousResolver> {
+        if forget_after <= 0.0 {
+            return Err(Error::BadArgument);
+        }
+        unsafe {
+            let handle = lsl_create_continuous_resolver(forget_after);
+            match handle.is_null() {
+                false => Ok(ContinuousResolver { handle }),
+                true => Err(Error::ResourceCreation)
+            }
+        }
+    }
+
+    /**
+    Construct a new `ContinuousResolver` that resolves all streams with a specific value for a
+    given property.
+
+    This is analogous to the functionality provided by the free function `resolve_stream(prop,value)`.
+
+    Arguments:
+    * `prop`: The `StreamInfo` property that should have a specific value (e.g., "name", "type",
+       "source_id", or "desc/manufaturer").
+    * `value`: The string value that the property should have (e.g., "EEG" as the type property).
+    * `forget_after`: When a stream is no longer visible on the network (e.g., because it was shut
+       down), this is the time in seconds after which it is no longer reported by the resolver.
+
+    This can return an `Error::BadArgument` or an `Error::ResourceCreation` in case resource
+    creation fails, which would be most likely due to resource exhaustion at the OS level (e.g.,
+    out of memory or possibly out of socket handles / ports).
+    */
+    pub fn new_with_prop(prop: &str, value: &str, forget_after: f64) -> Result<ContinuousResolver> {
+        if forget_after <= 0.0 {
+            return Err(Error::BadArgument);
+        }
+        let prop = ffi::CString::new(prop)?;
+        let value = ffi::CString::new(value)?;
+        unsafe {
+            let handle = lsl_create_continuous_resolver_byprop(
+                prop.as_ptr(), value.as_ptr(), forget_after);
+            match handle.is_null() {
+                false => Ok(ContinuousResolver { handle }),
+                true => Err(Error::ResourceCreation)
+            }
+        }
+    }
+
+    /**
+    Construct a new `ContinuousResolver` that resolves all streams with a specific value for a
+    given property.
+
+    This is analogous to the functionality provided by the free function `resolve_stream(prop,value)`.
+
+    Arguments:
+    * `prop`: The `StreamInfo` property that should have a specific value (e.g., "name", "type",
+       "source_id", or "desc/manufaturer").
+    * `value`: The string value that the property should have (e.g., "EEG" as the type property).
+    * `forget_after`: When a stream is no longer visible on the network (e.g., because it was shut
+       down), this is the time in seconds after which it is no longer reported by the resolver.
+
+    This can return an `Error::BadArgument` or an `Error::ResourceCreation` in case resource
+    creation fails, which would be most likely due to resource exhaustion at the OS level (e.g.,
+    out of memory or possibly out of socket handles / ports).
+    */
+    pub fn new_with_pred(pred: &str, forget_after: f64) -> Result<ContinuousResolver> {
+        if forget_after <= 0.0 {
+            return Err(Error::BadArgument);
+        }
+        let pred = ffi::CString::new(pred)?;
+        unsafe {
+            let handle = lsl_create_continuous_resolver_bypred(
+                pred.as_ptr(), forget_after);
+            match handle.is_null() {
+                false => Ok(ContinuousResolver { handle }),
+                true => Err(Error::ResourceCreation)
+            }
+        }
+    }
+
+    /**
+    Obtain the set of currently present streams on the network (i.e. resolve result).
+
+    Returns a vector of matching stream info objects (excluding their meta-data), any of which can
+    subsequently be used to open an inlet.
+    */
+    pub fn results(&self) -> Result<vec::Vec<StreamInfo>> {
+        // the fixed-size buffer is safe since the native function uses it as the max number of
+        // results
+        let mut buffer = [0 as lsl_streaminfo; 1024];
+        unsafe {
+            let num_resolved = ec_to_result(lsl_resolver_results(
+                self.handle,
+                buffer.as_mut_ptr(),
+                buffer.len() as u32))? as usize;
+            let results: Vec<_> = buffer[0..num_resolved].iter().map(
+                |x| {StreamInfo::from_handle(*x)}).collect();
+            Ok(results)
+        }
+    }
+}
+
+impl Drop for ContinuousResolver {
+    fn drop(&mut self) {
+        unsafe {
+            lsl_destroy_continuous_resolver(self.handle);
+        }
+    }
 }
 
 
@@ -1794,12 +1946,20 @@ impl fmt::Display for Error {
 // Internal function that creates a CString from a well-formed utf8-encoded &str and panics if
 // the string contains inline zero bytes.
 fn make_cstring(s: &str) -> ffi::CString {
-    ffi::CString::new(s).expect("No zero bytes are allowed in XML content.")
+    // if you're getting this, you passed a string containing 0 bytes to the library. Since C
+    // libraries cannot process such strings, this is a fatal error.
+    ffi::CString::new(s).expect("Embedded zero bytes are invalid in strings passed to \
+                                   liblsl.")
 }
 
 // Internal function that creates a String from a const char* returned by a trusted C routine.
 // Replaces invalid bytes by placeholder UTF8 characters.
 unsafe fn make_string(s: *const ::std::os::raw::c_char) -> String {
+    if s.is_null() {
+        // if this happens, the native library has returned a NULL pointer in a place where it
+        // shouldn't. this is most likely a fatal library bug.
+        panic!("Attemt to create a string from a NULL pointer.")
+    }
     ffi::CStr::from_ptr(s).to_string_lossy().into_owned()
 }
 
