@@ -35,3 +35,9 @@ bindgen liblsl/include/lsl_c.h \
 
 [liblsl]: https://github.com/sccn/liblsl
 [liblsl-rust]: https://github.com/intheon/liblsl-rust
+
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion 
+in the `lsl-sys` crate by you, shall be licensed as MIT, without any additional terms or conditions.

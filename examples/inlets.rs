@@ -87,7 +87,7 @@ fn receive_data_chunks() -> Result<(), lsl::Error> {
         println!("Reading data...");
         let dur = std::time::Duration::from_millis(300);
         loop {
-            let (samples, stamps): (Vec<Vec<f32>>, _) = inl.pull_chunk()?;
+            let (samples, stamps): (Vec<Vec<String>>, _) = inl.pull_chunk()?;
             for k in 0..samples.len() {
                 println!("got {:?} at time {}", samples[k], stamps[k]);
             }
@@ -99,7 +99,7 @@ fn receive_data_chunks() -> Result<(), lsl::Error> {
 }
 
 fn main() {
+    receive_markers().expect("Receive markers failed.");
     receive_data_chunks().expect("receive data in chunks failed.");
-    //receive_markers().expect("Receive markers failed.");
     //receive_data().expect("Receive data failed.")
 }

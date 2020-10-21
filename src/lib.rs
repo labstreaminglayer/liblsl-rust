@@ -1283,14 +1283,16 @@ impl StreamInlet {
         }
     }
 
+    // --- internal methods ---
+
     /**
-    Internal helper function to implement pull_sample generically using a provided native function.
+    Internal helper to implement `pull_sample()` for numeric value types.
 
     Arguments:
     * `func`: the native FFI function to call to pull a sample
-    * 'timeout': the timeout to pass in
+    * `timeout`: the timeout to pass in
     */
-    fn safe_pull<T: Clone + From<i8>>(&self, func: NativePullFunction<T>, timeout: f64) -> Result<(vec::Vec<T>, f64)> {
+    fn safe_pull_numeric<T: Clone + From<i8>>(&self, func: NativePullFunction<T>, timeout: f64) -> Result<(vec::Vec<T>, f64)> {
         let mut ec = [0 as i32];
         let mut result = vec![T::from(0); self.channel_count];
         unsafe {
@@ -1308,6 +1310,39 @@ impl StreamInlet {
         }
     }
 
+    /**
+    Internal helper to implement `pull_sample()` for types that can be be created from a
+    `&[u8]` slice of bytes.
+
+    Arguments:
+    * `mapper`: a function that converts from `&[u8]` to an owned copy in the type of interest.
+    * `timeout`: the timeout to pass to the native function
+    */
+    fn safe_pull_blob<T: Clone>(&self, mapper: fn(&[u8]) -> T, timeout: f64) -> Result<(vec::Vec<T>, f64)> {
+        let mut ec = [0 as i32];
+        let mut ptrs = vec![0 as *mut ::std::os::raw::c_char; self.channel_count];
+        let mut lens = vec![0 as u32; self.channel_count];
+        unsafe {
+            let ts = lsl_pull_sample_buf(
+                self.handle,
+                ptrs.as_mut_ptr(),
+                lens.as_mut_ptr(),
+                ptrs.len() as i32,
+                timeout,
+                ec.as_mut_ptr());
+            ec_to_result(ec[0])?;
+            let mut sample = vec::Vec::<T>::new();
+            if ts != 0.0 {
+                for k in 0..ptrs.len() {
+                    let slice = std::slice::from_raw_parts(ptrs[k] as *const u8,
+                                                                 lens[k] as usize);
+                    sample.push(mapper(slice));
+                    lsl_destroy_string(ptrs[k]);
+                }
+            }
+            Ok((sample, ts))
+        }
+    }
 }
 
 impl Drop for StreamInlet {
@@ -1317,7 +1352,6 @@ impl Drop for StreamInlet {
         }
     }
 }
-
 
 
 /**
@@ -1385,71 +1419,52 @@ pub trait Pullable<T> {
 
 impl Pullable<f32> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f32>, f64)> {
-        self.safe_pull::<f32>(lsl_pull_sample_f, timeout)
+        self.safe_pull_numeric::<f32>(lsl_pull_sample_f, timeout)
     }
 }
 
 impl Pullable<f64> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f64>, f64)> {
-        self.safe_pull::<f64>(lsl_pull_sample_d, timeout)
+        self.safe_pull_numeric::<f64>(lsl_pull_sample_d, timeout)
     }
 }
 
 #[cfg(not(windows))] // TODO: once we upgrade to liblsl 1.14, we can drop this platform restriction
 impl Pullable<i64> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i64>, f64)> {
-        self.safe_pull::<i64>(lsl_pull_sample_l, timeout)
+        self.safe_pull_numeric::<i64>(lsl_pull_sample_l, timeout)
     }
 }
 
 impl Pullable<i32> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i32>, f64)> {
-        self.safe_pull::<i32>(lsl_pull_sample_i, timeout)
+        self.safe_pull_numeric::<i32>(lsl_pull_sample_i, timeout)
     }
 }
 
 impl Pullable<i16> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i16>, f64)> {
-        self.safe_pull::<i16>(lsl_pull_sample_s, timeout)
+        self.safe_pull_numeric::<i16>(lsl_pull_sample_s, timeout)
     }
 }
 
 impl Pullable<i8> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i8>, f64)> {
-        self.safe_pull::<i8>(lsl_pull_sample_c, timeout)
+        self.safe_pull_numeric::<i8>(lsl_pull_sample_c, timeout)
     }
 }
 
 impl Pullable<String> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<String>, f64)> {
-        let mut ec = [0 as i32];
-        let mut ptrs = vec![0 as *mut ::std::os::raw::c_char; self.channel_count];
-        let mut lens = vec![0 as u32; self.channel_count];
-        unsafe {
-            let ts = lsl_pull_sample_buf(
-                self.handle,
-                ptrs.as_mut_ptr(),
-                lens.as_mut_ptr(),
-                ptrs.len() as i32,
-                timeout,
-                ec.as_mut_ptr());
-            ec_to_result(ec[0])?;
-            if ts != 0.0 {
-                let mut strings = vec![String::new(); self.channel_count];
-                for k in 0..ptrs.len() {
-                    let slice = std::slice::from_raw_parts(ptrs[k] as *const u8,
-                                                                 lens[k] as usize);
-                    strings[k] = String::from_utf8_lossy(slice).into_owned();
-                    lsl_destroy_string(ptrs[k]);
-                }
-                Ok((strings, ts))
-            } else {
-                Ok((vec::Vec::<String>::new(), ts))
-            }
-        }
+        self.safe_pull_blob::<String>(|x| { String::from_utf8_lossy(x).into_owned() }, timeout)
     }
 }
 
+impl Pullable<vec::Vec<u8>> for StreamInlet {
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<vec::Vec<u8>>, f64)> {
+        self.safe_pull_blob::<vec::Vec<u8>>(|x| { x.to_vec() }, timeout)
+    }
+}
 
 // helper functions for interop with native data types in the lsl_sys module
 impl ChannelFormat {

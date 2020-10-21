@@ -11,7 +11,6 @@ git clone --recurse-submodules https://github.com/intheon/liblsl-rust
 
 
 ## Contribution
-Unless you explicitly state otherwise, any contribution 
-intentionally submitted for inclusion in the `liblsl-rust` repository by you 
-shall be licensed under the MIT license, as found in the `LICENSE` file 
-at the repository root, without any additional terms or conditions.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion 
+in the `lsl` crate by you, shall be licensed as MIT, without any additional terms or conditions.
