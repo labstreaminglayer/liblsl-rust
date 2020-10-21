@@ -7,6 +7,15 @@ fn main() {
         lsl::ChannelFormat::Float32, "dsfge4646"
     ).unwrap();
 
+    // add metadata
+    let desc = info.desc();
+    let chns = desc.append_child("channels");
+    for &chn in &["C3", "C4", "Cz"] {
+        chns.append_child("channel")
+            .append_child_value("label", chn)
+            .append_child_value("unit", "microvolts");
+    }
+
     println!("\nThe stream's core information is:");
     println!("  name = {:?}", info.stream_name());
     println!("  type = {:?}", info.stream_type());

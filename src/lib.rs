@@ -28,7 +28,6 @@ use std::fmt;
 use std::vec;
 use std::convert::{From, TryFrom};
 
-mod utils;  // TODO: we can prob remove this
 
 /// Constant to indicate that a stream has variable sampling rate.
 pub const IRREGULAR_RATE: f64 = 0.0;
@@ -155,7 +154,7 @@ a good idea which exact library version is used.
 */
 pub fn library_info() -> String {
     unsafe {
-        ffi::CStr::from_ptr(lsl_library_info()).to_string_lossy().into_owned()
+        make_string(lsl_library_info())
     }
 }
 
@@ -270,7 +269,7 @@ impl StreamInfo {
     */
     pub fn stream_name(&self) -> String {
         unsafe {
-            ffi::CStr::from_ptr(lsl_get_name(self.handle)).to_string_lossy().into_owned()
+            make_string(lsl_get_name(self.handle))
         }
     }
 
@@ -285,7 +284,7 @@ impl StreamInfo {
     */
     pub fn stream_type(&self) -> String {
         unsafe {
-            ffi::CStr::from_ptr(lsl_get_type(self.handle)).to_string_lossy().into_owned()
+            make_string(lsl_get_type(self.handle))
         }
     }
 
@@ -333,7 +332,7 @@ impl StreamInfo {
     */
     pub fn source_id(&self) -> String {
         unsafe {
-            ffi::CStr::from_ptr(lsl_get_source_id(self.handle)).to_string_lossy().into_owned()
+            make_string(lsl_get_source_id(self.handle))
         }
     }
 
@@ -370,7 +369,7 @@ impl StreamInfo {
     */
     pub fn uid(&self) -> String {
         unsafe {
-            ffi::CStr::from_ptr(lsl_get_uid(self.handle)).to_string_lossy().into_owned()
+            make_string(lsl_get_uid(self.handle))
         }
     }
 
@@ -384,7 +383,7 @@ impl StreamInfo {
     */
     pub fn session_id(&self) -> String {
         unsafe {
-            ffi::CStr::from_ptr(lsl_get_session_id(self.handle)).to_string_lossy().into_owned()
+            make_string(lsl_get_session_id(self.handle))
         }
     }
 
@@ -393,7 +392,7 @@ impl StreamInfo {
     */
     pub fn hostname(&self) -> String {
         unsafe {
-            ffi::CStr::from_ptr(lsl_get_hostname(self.handle)).to_string_lossy().into_owned()
+            make_string(lsl_get_hostname(self.handle))
         }
     }
 
@@ -401,8 +400,24 @@ impl StreamInfo {
     // === Data Description ===
     // ========================
 
-    // TODO: desc() function
+    /**
+    Extended description of the stream.
 
+    It is highly recommended that at least the channel labels are described here.
+    See code examples on the LSL wiki. Other information, such as amplifier settings,
+    measurement units if deviating from defaults, setup information, subject information, etc.,
+    can be specified here, as well. Meta-data recommendations follow the XDF file format project
+    [here](https://github.com/sccn/xdf/wiki/Meta-Data) (or web search for: XDF meta-data).
+
+    **Important:** if you use a stream content type for which meta-data recommendations exist, please
+    try to lay out your meta-data in agreement with these recommendations for compatibility with
+    other applications.
+    */
+    pub fn desc(&self) -> XMLElement {
+        unsafe {
+            XMLElement { cursor: lsl_get_desc(self.handle) }
+        }
+    }
 
     /**
     Test whether the stream information matches the given query string.
@@ -1177,7 +1192,7 @@ impl StreamInlet {
     Retrieve extended time-correction information for the given stream.
 
     This function is used like `time_correction()`, but instead returns additional information in
-    a tuple of 3 values, which are (`time_offset`, `remote_time`, `rtt`), where:
+    a tuple of 3 values, which are (`time_offset`, `remote_time`, `uncertainty`), where:
 
     * `time_offset` corresponds to the return value of `time_correction()` (see for explanation).
     * `remote_time` is the remote time when the measurement was made, and
@@ -1185,9 +1200,10 @@ impl StreamInlet {
        (this will typically lie as much as a few seconds before the current time point -- not
        because of inaccuracy, but because measurements are made periodically in the background,
        and the function only returns the most recent one of them).
-    * `rtt` is the round-trip-time (RTT) of the measurement in seconds, which is a hard upper bound
-       on the uncertainty of the time offset. Empirically, 0.2 ms a typical RTT for wired networks,
-       2 ms is typical of wireless networks, but it can be much higher on poor networks.
+    * `uncertainty` is the round-trip-time (RTT) of the measurement in seconds, which is a hard
+       upper bound on the uncertainty of the time offset. Empirically, 0.2 ms a typical RTT for
+       wired networks, 2 ms is typical of wireless networks, but it can be much higher on poor
+       networks.
     */
     pub fn time_correction_ex(&self, timeout: f64) -> Result<(f64, f64, f64)> {
         let mut ec = [0 as i32];
@@ -1462,7 +1478,232 @@ impl Pullable<vec::Vec<u8>> for StreamInlet {
 }
 
 
-// === Internal details ===
+// =====================
+// ==== XML Element ====
+// =====================
+
+/**
+A lightweight XML element tree; models the `.desc()` field of `StreamInfo`.
+
+Has a name and can have multiple named children or have text content as value; attributes are
+omitted. *Tip:* The interface is modeled after a subset of pugixml's node type and is compatible
+with it. See also https://pugixml.org/docs/manual.html#access for additional documentation.
+
+Note: any strings passed into this function must be valid UTF8-encoded strings and contain no
+intermittent zero bytes.
+*/
+pub struct XMLElement {
+    cursor: lsl_xml_ptr
+}
+
+impl XMLElement {
+
+    // === Tree Navigation ===
+
+    /// Get the first child of the element.
+    pub fn first_child(&self) -> XMLElement {
+        unsafe {
+            XMLElement { cursor: lsl_first_child(self.cursor) }
+        }
+    }
+
+    /// Get the last child of the element.
+    pub fn last_child(&self) -> XMLElement {
+        unsafe {
+            XMLElement { cursor: lsl_last_child(self.cursor) }
+        }
+    }
+
+    /// Get the next sibling in the children list of the parent node.
+    pub fn next_sibling(&self) -> XMLElement {
+        unsafe {
+            XMLElement { cursor: lsl_next_sibling(self.cursor) }
+        }
+    }
+
+    /// Get the previous sibling in the children list of the parent node.
+    pub fn previous_sibling(&self) -> XMLElement {
+        unsafe {
+            XMLElement { cursor: lsl_previous_sibling(self.cursor) }
+        }
+    }
+
+    /// Get the parent node.
+    pub fn parent(&self) -> XMLElement {
+        unsafe {
+            XMLElement { cursor: lsl_parent(self.cursor) }
+        }
+    }
+
+
+    // === Tree Navigation by Name ===
+
+    /// Get a child with a specified name.
+    pub fn child(&self, name: &str) -> XMLElement {
+        unsafe {
+            let name = make_cstring(name);
+            XMLElement { cursor: lsl_child(self.cursor, name.as_ptr()) }
+        }
+    }
+
+    /// Get the next sibling with the specified name.
+    pub fn next_sibling_named(&self, name: &str) -> XMLElement {
+        unsafe {
+            let name = make_cstring(name);
+            XMLElement { cursor: lsl_next_sibling_n(self.cursor, name.as_ptr()) }
+        }
+    }
+
+    /// Get the previous sibling with the specified name.
+    pub fn previous_sibling_named(&self, name: &str) -> XMLElement {
+        unsafe {
+            let name = make_cstring(name);
+            XMLElement { cursor: lsl_previous_sibling_n(self.cursor, name.as_ptr()) }
+        }
+    }
+
+
+    // === Content Queries ===
+
+    /// Whether this node is empty.
+    pub fn empty(&self) -> bool {
+        unsafe {
+            lsl_empty(self.cursor) != 0
+        }
+    }
+
+    /// Whether this is a text body (instead of an XML element). True both for plain char data and CData.
+    pub fn is_text(&self) -> bool {
+        unsafe {
+            lsl_is_text(self.cursor) != 0
+        }
+    }
+
+    /// Name of the element.
+    pub fn name(&self) -> String {
+        unsafe {
+            make_string(lsl_name(self.cursor))
+        }
+    }
+
+    /// Value of the element.
+    pub fn value(&self) -> String {
+        unsafe {
+            make_string(lsl_value(self.cursor))
+        }
+    }
+
+    /// Get child value (value of the first child that is text).
+    pub fn child_value(&self) -> String {
+        unsafe {
+            make_string(lsl_child_value(self.cursor))
+        }
+    }
+
+    /// Get child value of a child with a specified name.
+    pub fn child_value_named(&self, name: &str) -> String {
+        unsafe {
+            let name = make_cstring(name);
+            make_string(lsl_child_value_n(self.cursor, name.as_ptr()))
+        }
+    }
+
+
+    // === Modification ===
+
+    /// Append a child node with a given name, which has a (nameless) plain-text child with the given text value.
+    pub fn append_child_value(&self, name: &str, value: &str) -> XMLElement {
+        unsafe {
+            let name = make_cstring(name);
+            let value = make_cstring(value);
+            XMLElement { cursor: lsl_append_child_value(self.cursor, name.as_ptr(), value.as_ptr()) }
+        }
+    }
+
+    /// Prepend a child node with a given name, which has a (nameless) plain-text child with the given text value.
+    pub fn prepend_child_value(&self, name: &str, value: &str) -> XMLElement {
+        unsafe {
+            let name = make_cstring(name);
+            let value = make_cstring(value);
+            XMLElement { cursor: lsl_prepend_child_value(self.cursor, name.as_ptr(), value.as_ptr()) }
+        }
+    }
+
+    /// Set the text value of the (nameless) plain-text child of a named child node.
+    pub fn set_child_value(&self, name: &str, value: &str) -> bool {
+        unsafe {
+            let name = make_cstring(name);
+            let value = make_cstring(value);
+            lsl_set_child_value(self.cursor, name.as_ptr(), value.as_ptr()) != 0
+        }
+    }
+
+    /// Set the element's name. Returns false if the node is empty (or if out of memory).
+    pub fn set_name(&self, rhs: &str) -> bool {
+        unsafe {
+            let rhs = make_cstring(rhs);
+            lsl_set_name(self.cursor, rhs.as_ptr()) != 0
+        }
+    }
+
+    /// Set the element's value. Returns false if the node is empty (or if out of memory).
+    pub fn set_value(&self, rhs: &str) -> bool {
+        unsafe {
+            let rhs = make_cstring(rhs);
+            lsl_set_value(self.cursor, rhs.as_ptr()) != 0
+        }
+    }
+
+    /// Append a child element with the specified name.
+    pub fn append_child(&self, name: &str) -> XMLElement {
+        unsafe {
+            let name = make_cstring(name);
+            XMLElement { cursor: lsl_append_child(self.cursor, name.as_ptr()) }
+        }
+    }
+
+    /// Prepend a child element with the specified name.
+    pub fn prepend_child(&self, name: &str) -> XMLElement {
+        unsafe {
+            let name = make_cstring(name);
+            XMLElement { cursor: lsl_prepend_child(self.cursor, name.as_ptr()) }
+        }
+    }
+
+    /// Append a copy of the specified element as a child.
+    pub fn append_copy(&self, e: XMLElement) -> XMLElement {
+        unsafe {
+            XMLElement { cursor: lsl_append_copy(self.cursor, e.cursor) }
+        }
+    }
+
+    /// Prepend a child element with the specified name.
+    pub fn prepend_copy(&self, e: XMLElement) -> XMLElement {
+        unsafe {
+            XMLElement { cursor: lsl_prepend_copy(self.cursor, e.cursor) }
+        }
+    }
+
+    /// Remove a specified child element.
+    pub fn remove_child(&self, e: XMLElement) {
+        unsafe {
+            lsl_remove_child(self.cursor, e.cursor);
+        }
+    }
+
+    /// Remove a child element with the specified name.
+    pub fn remove_child_named(&self, name: &str) {
+        unsafe {
+            let name = make_cstring(name);
+            lsl_remove_child_n(self.cursor, name.as_ptr());
+        }
+    }
+}
+
+
+// ========================
+// === Internal Helpers ===
+// ========================
 
 // internal signature of one of the lsl_push_sample_*tp functions
 type NativePushFunction<T> = unsafe extern "C" fn(*mut lsl_outlet_struct_, *const T, f64, i32) -> i32;
@@ -1530,6 +1771,18 @@ impl fmt::Display for Error {
         };
         write!(f, "{}", msg)
     }
+}
+
+// Internal function that creates a CString from a well-formed utf8-encoded &str and panics if
+// the string contains inline zero bytes.
+fn make_cstring(s: &str) -> ffi::CString {
+    ffi::CString::new(s).expect("No zero bytes are allowed in XML content.")
+}
+
+// Internal function that creates a String from a const char* returned by a trusted C routine.
+// Replaces invalid bytes by placeholder UTF8 characters.
+unsafe fn make_string(s: *const ::std::os::raw::c_char) -> String {
+    ffi::CStr::from_ptr(s).to_string_lossy().into_owned()
 }
 
 // check whether a given value that may be an error code signals an error,
