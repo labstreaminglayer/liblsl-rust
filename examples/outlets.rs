@@ -91,9 +91,9 @@ fn type_gymnastics() {
 
 
 fn main() {
-    send_data_in_chunks();
-    send_markers();
     send_data();
+    send_markers();
+    send_data_in_chunks();
     type_gymnastics();
 
 }

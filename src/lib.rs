@@ -26,7 +26,7 @@ use lsl_sys::*;
 use std::ffi;
 use std::fmt;
 use std::vec;
-use std::convert::TryFrom;
+use std::convert::{From, TryFrom};
 
 mod utils;  // TODO: we can prob remove this
 
@@ -777,6 +777,10 @@ pub trait ExPushable<T>: HasNominalRate {
     }
 }
 
+// TODO: use a safe_push here too
+//       and a safe_push_buf or so for String, str, Vec<u8>
+//       also maybe tokio's bytes as an optional feature
+
 // LSL outlets do type conversion to the defined channel format on push (even numbers to string
 // if so desired), so we can safely add all push_sample_ex() overloads (n.b. except from string to
 // number if the string doesn't actually represent a number, then the sample will be dropped)
@@ -835,6 +839,7 @@ impl ExPushable<vec::Vec<i32>> for StreamOutlet {
     }
 }
 
+#[cfg(not(windows))] // TODO: once we upgrade to liblsl 1.14, we can drop this platform restriction
 impl ExPushable<vec::Vec<i64>> for StreamOutlet {
     fn push_sample_ex(&self, data: &vec::Vec<i64>, timestamp: f64, pushthrough: bool) -> Result<()> {
         self.assert_len(data.len());
@@ -1020,6 +1025,10 @@ pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> Result<vec::V
 // ======================
 // ==== Stream Inlet ====
 // ======================
+
+// internal signature of one of the lsl_pull_sample* functions
+type NativePullFunction<T> = unsafe extern "C" fn(*mut lsl_inlet_struct_, *mut T, i32, f64, *mut i32) -> f64;
+
 
 /**
 A stream inlet.
@@ -1274,6 +1283,31 @@ impl StreamInlet {
         }
     }
 
+    /**
+    Internal helper function to implement pull_sample generically using a provided native function.
+
+    Arguments:
+    * `func`: the native FFI function to call to pull a sample
+    * 'timeout': the timeout to pass in
+    */
+    fn safe_pull<T: Clone + From<i8>>(&self, func: NativePullFunction<T>, timeout: f64) -> Result<(vec::Vec<T>, f64)> {
+        let mut ec = [0 as i32];
+        let mut result = vec![T::from(0); self.channel_count];
+        unsafe {
+            let ts = func(
+                self.handle,
+                result.as_mut_ptr(),
+                result.len() as i32,
+                timeout,
+                ec.as_mut_ptr());
+            ec_to_result(ec[0])?;
+            if ts == 0.0 {
+                result.clear();
+            }
+            Ok((result, ts))
+        }
+    }
+
 }
 
 impl Drop for StreamInlet {
@@ -1351,20 +1385,67 @@ pub trait Pullable<T> {
 
 impl Pullable<f32> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f32>, f64)> {
+        self.safe_pull::<f32>(lsl_pull_sample_f, timeout)
+    }
+}
+
+impl Pullable<f64> for StreamInlet {
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f64>, f64)> {
+        self.safe_pull::<f64>(lsl_pull_sample_d, timeout)
+    }
+}
+
+#[cfg(not(windows))] // TODO: once we upgrade to liblsl 1.14, we can drop this platform restriction
+impl Pullable<i64> for StreamInlet {
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i64>, f64)> {
+        self.safe_pull::<i64>(lsl_pull_sample_l, timeout)
+    }
+}
+
+impl Pullable<i32> for StreamInlet {
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i32>, f64)> {
+        self.safe_pull::<i32>(lsl_pull_sample_i, timeout)
+    }
+}
+
+impl Pullable<i16> for StreamInlet {
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i16>, f64)> {
+        self.safe_pull::<i16>(lsl_pull_sample_s, timeout)
+    }
+}
+
+impl Pullable<i8> for StreamInlet {
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i8>, f64)> {
+        self.safe_pull::<i8>(lsl_pull_sample_c, timeout)
+    }
+}
+
+impl Pullable<String> for StreamInlet {
+    fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<String>, f64)> {
         let mut ec = [0 as i32];
-        let mut result = vec![0.0 as f32; self.channel_count];
+        let mut ptrs = vec![0 as *mut ::std::os::raw::c_char; self.channel_count];
+        let mut lens = vec![0 as u32; self.channel_count];
         unsafe {
-            let ts = lsl_pull_sample_f(
+            let ts = lsl_pull_sample_buf(
                 self.handle,
-                result.as_mut_ptr(),
-                result.len() as i32,
+                ptrs.as_mut_ptr(),
+                lens.as_mut_ptr(),
+                ptrs.len() as i32,
                 timeout,
                 ec.as_mut_ptr());
             ec_to_result(ec[0])?;
-            if ts == 0.0 {
-                result.clear();
+            if ts != 0.0 {
+                let mut strings = vec![String::new(); self.channel_count];
+                for k in 0..ptrs.len() {
+                    let slice = std::slice::from_raw_parts(ptrs[k] as *const u8,
+                                                                 lens[k] as usize);
+                    strings[k] = String::from_utf8_lossy(slice).into_owned();
+                    lsl_destroy_string(ptrs[k]);
+                }
+                Ok((strings, ts))
+            } else {
+                Ok((vec::Vec::<String>::new(), ts))
             }
-            Ok((result, ts))
         }
     }
 }
