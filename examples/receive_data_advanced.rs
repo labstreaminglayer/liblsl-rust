@@ -21,7 +21,7 @@ fn main() -> Result<(), lsl::Error> {
     // now that we have the inlet we can use it to retrieve the full StreamInfo object from it
     // (since custom meta-data could in theory be gigabytes, this is not transmitted by the resolve
     // call)
-    let info = inl.info(5.0)?;
+    let mut info = inl.info(5.0)?;
 
     // we can now traverse the extended meta-data of the stream to get the information we need
     // (usually we'll want at least the channel labels, which are typically stored as below)

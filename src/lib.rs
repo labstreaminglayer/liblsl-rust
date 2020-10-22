@@ -29,6 +29,7 @@ use lsl_sys::*;
 use std::convert::{From, TryFrom};
 use std::ffi;
 use std::fmt;
+use std::rc;
 use std::vec;
 
 /// Constant to indicate that a stream has variable sampling rate.
@@ -179,6 +180,7 @@ pub fn local_clock() -> f64 {
     unsafe { lsl_local_clock() }
 }
 
+
 // ==========================
 // === Stream Declaration ===
 // ==========================
@@ -208,7 +210,8 @@ github repository). You can find various uses of the `StreamInfo` object in most
 */
 #[derive(Debug)]
 pub struct StreamInfo {
-    handle: lsl_streaminfo,
+    // internal fields
+    handle: rc::Rc<StreamInfoHandle>,
 }
 
 impl StreamInfo {
@@ -264,7 +267,7 @@ impl StreamInfo {
                 source_id.as_ptr(),
             );
             match handle.is_null() {
-                false => Ok(StreamInfo { handle }),
+                false => Ok(StreamInfo { handle: rc::Rc::new(StreamInfoHandle { handle }) }),
                 true => Err(Error::ResourceCreation),
             }
         }
@@ -284,7 +287,7 @@ impl StreamInfo {
     experimenter).
     */
     pub fn stream_name(&self) -> String {
-        unsafe { make_string(lsl_get_name(self.handle)) }
+        unsafe { make_string(lsl_get_name(self.handle.handle )) }
     }
 
     /**
@@ -297,7 +300,7 @@ impl StreamInfo {
     search for: XDF meta-data).
     */
     pub fn stream_type(&self) -> String {
-        unsafe { make_string(lsl_get_type(self.handle)) }
+        unsafe { make_string(lsl_get_type(self.handle.handle )) }
     }
 
     /**
@@ -305,7 +308,7 @@ impl StreamInfo {
     A stream has at least one channel; the channel count stays constant for all samples.
     */
     pub fn channel_count(&self) -> i32 {
-        unsafe { lsl_get_channel_count(self.handle) }
+        unsafe { lsl_get_channel_count(self.handle.handle ) }
     }
 
     /**
@@ -319,7 +322,7 @@ impl StreamInfo {
     of the device.
     */
     pub fn nominal_srate(&self) -> f64 {
-        unsafe { lsl_get_nominal_srate(self.handle) }
+        unsafe { lsl_get_nominal_srate(self.handle.handle) }
     }
 
     /**
@@ -328,7 +331,7 @@ impl StreamInfo {
     time-synched streams each with its own format.
     */
     pub fn channel_format(&self) -> ChannelFormat {
-        unsafe { ChannelFormat::from_native(lsl_get_channel_format(self.handle)) }
+        unsafe { ChannelFormat::from_native(lsl_get_channel_format(self.handle.handle)) }
     }
 
     /** Unique identifier of the stream's source, if available.
@@ -337,7 +340,7 @@ impl StreamInfo {
     automatically once it is back online.
     */
     pub fn source_id(&self) -> String {
-        unsafe { make_string(lsl_get_source_id(self.handle)) }
+        unsafe { make_string(lsl_get_source_id(self.handle.handle)) }
     }
 
     // ======================================
@@ -349,7 +352,7 @@ impl StreamInfo {
     Protocol version used to deliver the stream. Formatted like `lsl::protocol_version()`.
     */
     pub fn version(&self) -> i32 {
-        unsafe { lsl_get_version(self.handle) }
+        unsafe { lsl_get_version(self.handle.handle) }
     }
 
     /**
@@ -358,7 +361,7 @@ impl StreamInfo {
     (as determined via `lsl::local_clock()` on the providing machine).
     */
     pub fn created_at(&self) -> f64 {
-        unsafe { lsl_get_created_at(self.handle) }
+        unsafe { lsl_get_created_at(self.handle.handle) }
     }
 
     /**
@@ -367,7 +370,7 @@ impl StreamInfo {
     across multiple instantiations of the same outlet (e.g., after a re-start).
     */
     pub fn uid(&self) -> String {
-        unsafe { make_string(lsl_get_uid(self.handle)) }
+        unsafe { make_string(lsl_get_uid(self.handle.handle)) }
     }
 
     /**
@@ -379,14 +382,14 @@ impl StreamInfo {
     wiki).
     */
     pub fn session_id(&self) -> String {
-        unsafe { make_string(lsl_get_session_id(self.handle)) }
+        unsafe { make_string(lsl_get_session_id(self.handle.handle)) }
     }
 
     /**
     Hostname of the providing machine.
     */
     pub fn hostname(&self) -> String {
-        unsafe { make_string(lsl_get_hostname(self.handle)) }
+        unsafe { make_string(lsl_get_hostname(self.handle.handle)) }
     }
 
     // ========================
@@ -394,7 +397,7 @@ impl StreamInfo {
     // ========================
 
     /**
-    Extended description of the stream.
+    Access the extended description of the stream.
 
     It is highly recommended that at least the channel labels are described here.
     See code examples on the LSL wiki. Other information, such as amplifier settings,
@@ -406,10 +409,13 @@ impl StreamInfo {
     please try to lay out your meta-data in agreement with these recommendations for compatibility
     with other applications.
     */
-    pub fn desc(&self) -> XMLElement {
+    pub fn desc(&mut self) -> XMLElement {
         unsafe {
             XMLElement {
-                cursor: lsl_get_desc(self.handle),
+                cursor: lsl_get_desc(self.handle.handle),
+                // XMLElement wraps a pointer into the info's descriptive content; keep a shared
+                // ref of the underlying native info handle
+                doc: self.handle.clone()
             }
         }
     }
@@ -420,7 +426,7 @@ impl StreamInfo {
     */
     pub fn matches_query(&self, query: &str) -> bool {
         if let Ok(query) = ffi::CString::new(query) {
-            unsafe { lsl_stream_info_matches_query(self.handle, query.as_ptr()) != 0 }
+            unsafe { lsl_stream_info_matches_query(self.handle.handle, query.as_ptr()) != 0 }
         } else {
             false
         }
@@ -447,7 +453,7 @@ impl StreamInfo {
     */
     pub fn to_xml(&self) -> Result<String> {
         unsafe {
-            let tmpstr = lsl_get_xml(self.handle);
+            let tmpstr = lsl_get_xml(self.handle.handle);
             if tmpstr.is_null() {
                 return Err(Error::Internal);
             }
@@ -459,12 +465,12 @@ impl StreamInfo {
 
     /// Number of bytes occupied by a channel (0 for string-typed channels).
     pub fn channel_bytes(&self) -> i32 {
-        unsafe { lsl_get_channel_bytes(self.handle) }
+        unsafe { lsl_get_channel_bytes(self.handle.handle) }
     }
 
     /// Number of bytes occupied by a sample (0 for string-typed channels).
     pub fn sample_bytes(&self) -> i32 {
-        unsafe { lsl_get_sample_bytes(self.handle) }
+        unsafe { lsl_get_sample_bytes(self.handle.handle) }
     }
 
     /// Construct a blank `StreamInfo`.
@@ -483,50 +489,43 @@ impl StreamInfo {
         unsafe {
             let handle = lsl_streaminfo_from_xml(xml.as_ptr());
             match handle.is_null() {
-                false => Ok(StreamInfo { handle }),
+                false => Ok(StreamInfo { handle: rc::Rc::new(StreamInfoHandle { handle }) }),
                 true => Err(Error::ResourceCreation),
             }
         }
     }
 
-    /// Get the native implementation handle. Internal but exposed to allow experimental uses.
-    #[doc(hidden)]
-    pub fn native_handle(&self) -> lsl_streaminfo {
-        self.handle
-    }
+    // === internal methods ===
 
     /*
     Create a `StreamInfo` from a native handle.
 
-    The info object takes ownership of the handle and will deallocate it on drop. This is considered
-    internal since you can only get such a handle by calling raw native C library functions.
+    The info object takes ownership of the handle. This is considered internal since you can only
+    get such a handle by calling raw native C library functions.
     */
     fn from_handle(handle: lsl_streaminfo) -> StreamInfo {
         assert!(
             !handle.is_null(),
             "Attempted to create a StreamInfo from a NULL handle."
         );
-        StreamInfo { handle }
+        StreamInfo { handle: rc::Rc::new(StreamInfoHandle { handle } ) }
     }
-}
 
-impl Drop for StreamInfo {
-    fn drop(&mut self) {
-        unsafe {
-            lsl_destroy_streaminfo(self.handle);
-        }
+    // Get the native implementation handle.
+    fn native_handle(&self) -> lsl_streaminfo {
+        self.handle.handle
     }
 }
 
 impl Clone for StreamInfo {
     fn clone(&self) -> StreamInfo {
         unsafe {
-            let handle = lsl_copy_streaminfo(self.handle);
+            let handle = lsl_copy_streaminfo(self.handle.handle);
             assert!(
                 !handle.is_null(),
                 "Failed to clone native lsl_streaminfo object."
             );
-            StreamInfo { handle }
+            StreamInfo { handle: rc::Rc::new(StreamInfoHandle { handle }) }
         }
     }
 }
@@ -1617,7 +1616,7 @@ A lightweight XML element tree; models the `.desc()` field of `StreamInfo`.
 
 This class can be tought of as a "cursor" in an XML document owned by the `StreamInfo`, which
 provides operations for navigating to parent, children and sibling elements, as well as modification
-operations for inserting (or removing) content. Each element has a name and can have multiple named
+operations for inserting or removing content. Each element has a name and can have multiple named
 children or have text content as value; attributes are omitted. Most operations return a node,
 which allows you to chain multiple operations. The API is modeled after a subset of pugixml's node
 type and is compatible with it. See also [here](https://pugixml.org/docs/manual.html#access) for
@@ -1634,9 +1633,11 @@ intermittent zero bytes (otherwise this will assert).
 **Examples:** the `*advanced.rs` examples (found in the crate's github repository) illustrate the
 use of `XMLElement` cursors.
 */
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct XMLElement {
+    // internal fields
     cursor: lsl_xml_ptr,
+    doc: rc::Rc<StreamInfoHandle>,
 }
 
 impl XMLElement {
@@ -1647,6 +1648,7 @@ impl XMLElement {
         unsafe {
             XMLElement {
                 cursor: lsl_first_child(self.cursor),
+                doc: self.doc.clone(),
             }
         }
     }
@@ -1656,6 +1658,7 @@ impl XMLElement {
         unsafe {
             XMLElement {
                 cursor: lsl_last_child(self.cursor),
+                doc: self.doc.clone(),
             }
         }
     }
@@ -1665,6 +1668,7 @@ impl XMLElement {
         unsafe {
             XMLElement {
                 cursor: lsl_next_sibling(self.cursor),
+                doc: self.doc.clone(),
             }
         }
     }
@@ -1674,6 +1678,7 @@ impl XMLElement {
         unsafe {
             XMLElement {
                 cursor: lsl_previous_sibling(self.cursor),
+                doc: self.doc.clone(),
             }
         }
     }
@@ -1683,6 +1688,7 @@ impl XMLElement {
         unsafe {
             XMLElement {
                 cursor: lsl_parent(self.cursor),
+                doc: self.doc.clone(),
             }
         }
     }
@@ -1695,6 +1701,7 @@ impl XMLElement {
             let name = make_cstring(name);
             XMLElement {
                 cursor: lsl_child(self.cursor, name.as_ptr()),
+                doc: self.doc.clone(),
             }
         }
     }
@@ -1705,6 +1712,7 @@ impl XMLElement {
             let name = make_cstring(name);
             XMLElement {
                 cursor: lsl_next_sibling_n(self.cursor, name.as_ptr()),
+                doc: self.doc.clone(),
             }
         }
     }
@@ -1715,6 +1723,7 @@ impl XMLElement {
             let name = make_cstring(name);
             XMLElement {
                 cursor: lsl_previous_sibling_n(self.cursor, name.as_ptr()),
+                doc: self.doc.clone(),
             }
         }
     }
@@ -1757,32 +1766,42 @@ impl XMLElement {
 
     // === Modification ===
 
-    /// Append a child node with a given name, which has a (nameless) plain-text child with
-    /// the given text value.
-    pub fn append_child_value(&self, name: &str, value: &str) -> XMLElement {
+    /**
+    Append a child node with a given name, and give it a (nameless) plain-text child with
+    the given text value.
+
+    Returns the same element on which the operation was performed (not the child).
+    */
+    pub fn append_child_value(&mut self, name: &str, value: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
             let value = make_cstring(value);
             XMLElement {
                 cursor: lsl_append_child_value(self.cursor, name.as_ptr(), value.as_ptr()),
+                doc: self.doc.clone(),
             }
         }
     }
 
-    /// Prepend a child node with a given name, which has a (nameless) plain-text child with
-    /// the given text value.
-    pub fn prepend_child_value(&self, name: &str, value: &str) -> XMLElement {
+    /**
+    Prepend a child node with a given name and give it a (nameless) plain-text child with
+    the given text value.
+
+    Returns the same element on which the operation was performed (not the child).
+    */
+    pub fn prepend_child_value(&mut self, name: &str, value: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
             let value = make_cstring(value);
             XMLElement {
                 cursor: lsl_prepend_child_value(self.cursor, name.as_ptr(), value.as_ptr()),
+                doc: self.doc.clone(),
             }
         }
     }
 
     /// Set the text value of the (nameless) plain-text child of a named child node.
-    pub fn set_child_value(&self, name: &str, value: &str) -> bool {
+    pub fn set_child_value(&mut self, name: &str, value: &str) -> bool {
         unsafe {
             let name = make_cstring(name);
             let value = make_cstring(value);
@@ -1791,7 +1810,7 @@ impl XMLElement {
     }
 
     /// Set the element's name. Returns false if the node is empty (or if out of memory).
-    pub fn set_name(&self, rhs: &str) -> bool {
+    pub fn set_name(&mut self, rhs: &str) -> bool {
         unsafe {
             let rhs = make_cstring(rhs);
             lsl_set_name(self.cursor, rhs.as_ptr()) != 0
@@ -1799,60 +1818,64 @@ impl XMLElement {
     }
 
     /// Set the element's value. Returns false if the node is empty (or if out of memory).
-    pub fn set_value(&self, rhs: &str) -> bool {
+    pub fn set_value(&mut self, rhs: &str) -> bool {
         unsafe {
             let rhs = make_cstring(rhs);
             lsl_set_value(self.cursor, rhs.as_ptr()) != 0
         }
     }
 
-    /// Append a child element with the specified name.
-    pub fn append_child(&self, name: &str) -> XMLElement {
+    /// Append a child element with the specified name and return it.
+    pub fn append_child(&mut self, name: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
             XMLElement {
                 cursor: lsl_append_child(self.cursor, name.as_ptr()),
+                doc: self.doc.clone(),
             }
         }
     }
 
-    /// Prepend a child element with the specified name.
-    pub fn prepend_child(&self, name: &str) -> XMLElement {
+    /// Prepend a child element with the specified name and return it.
+    pub fn prepend_child(&mut self, name: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
             XMLElement {
                 cursor: lsl_prepend_child(self.cursor, name.as_ptr()),
+                doc: self.doc.clone(),
             }
         }
     }
 
-    /// Append a copy of the specified element as a child.
-    pub fn append_copy(&self, e: XMLElement) -> XMLElement {
+    /// Append a copy of the specified element as a child and return a cursor to the result.
+    pub fn append_copy(&mut self, e: XMLElement) -> XMLElement {
         unsafe {
             XMLElement {
                 cursor: lsl_append_copy(self.cursor, e.cursor),
+                doc: self.doc.clone(),
             }
         }
     }
 
-    /// Prepend a child element with the specified name.
-    pub fn prepend_copy(&self, e: XMLElement) -> XMLElement {
+    /// Prepend a child element with the specified name and return a cursor to the result.
+    pub fn prepend_copy(&mut self, e: XMLElement) -> XMLElement {
         unsafe {
             XMLElement {
                 cursor: lsl_prepend_copy(self.cursor, e.cursor),
+                doc: self.doc.clone(),
             }
         }
     }
 
     /// Remove a specified child element.
-    pub fn remove_child(&self, e: XMLElement) {
+    pub fn remove_child(&mut self, e: XMLElement) {
         unsafe {
             lsl_remove_child(self.cursor, e.cursor);
         }
     }
 
     /// Remove a child element with the specified name.
-    pub fn remove_child_named(&self, name: &str) {
+    pub fn remove_child_named(&mut self, name: &str) {
         unsafe {
             let name = make_cstring(name);
             lsl_remove_child_n(self.cursor, name.as_ptr());
@@ -1865,7 +1888,7 @@ impl XMLElement {
     }
 }
 
-impl fmt::Display for XMLElement {
+impl<'a> fmt::Display for XMLElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_valid() {
             write!(
@@ -2028,6 +2051,18 @@ impl Drop for ContinuousResolver {
 // ========================
 // === Internal Helpers ===
 // ========================
+
+// wrapper around a native streaminfo handle
+#[derive(Debug)]
+struct StreamInfoHandle { handle: lsl_streaminfo }
+
+impl Drop for StreamInfoHandle {
+    fn drop(&mut self) {
+        unsafe {
+            lsl_destroy_streaminfo(self.handle);
+        }
+    }
+}
 
 // internal signature of one of the lsl_push_sample_*tp functions
 type NativePushFunction<T> = unsafe extern "C" fn(lsl_outlet, *const T, f64, i32) -> i32;

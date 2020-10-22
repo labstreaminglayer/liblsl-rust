@@ -10,7 +10,7 @@ fn main() -> Result<(), lsl::Error> {
     // or some stable identifier of the data source that's unique within your network (you can
     // omit it, but if you do, receivers of your data wouldn't seamlessly resume if you stop and
     // restart your program).
-    let info = lsl::StreamInfo::new(
+    let mut info = lsl::StreamInfo::new(
         "BioSemi", "EEG", 8, 100.0,
         lsl::ChannelFormat::Float32, "myid234365")?;
 
@@ -18,7 +18,7 @@ fn main() -> Result<(), lsl::Error> {
     // conventions (see https://github.com/sccn/xdf/wiki/Meta-Data#stream-content-types), we
     // strongly advise to follow those for max interoperability. If you have other data and want to
     // contribute to standardizing LSL meta-data for it, PRs against that spec are always encouraged.
-    let channels = info.desc().append_child("channels");
+    let mut channels = info.desc().append_child("channels");
     // here we're declaring some channel names for our 8 channels
     for c in &["C3", "C4", "Cz", "FPz", "POz", "CPz", "O1", "O2"] {
         channels.append_child("channel")
@@ -26,6 +26,7 @@ fn main() -> Result<(), lsl::Error> {
             .append_child_value("unit", "microvolts")
             .append_child_value("type", "EEG");
     }
+
 
     // Next we create a stream outlet. This makes our stream visible on the network.
     // We can have the data transmitted in chunks to reduce network bandwidth, and here we use 20
