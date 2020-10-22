@@ -61,6 +61,7 @@ pub enum Error {
     Unknown
 }
 
+
 /// Result type alias for results with library-specific errors.
 type Result<T> = std::result::Result<T, Error>;
 
@@ -114,7 +115,6 @@ pub enum ProcessingOption {
     /// Post-processing is thread-safe (same inlet can be read from by multiple threads);
     /// uses somewhat more CPU.
     Threadsafe = 8,
-    Nonsense = 16,
     /// The combination of all possible post-processing options.
     ALL = 1|2|4|8
 }
@@ -199,6 +199,7 @@ a data stream, and therefore, anything you would expect to find in a file header
 data file should be written into the stream info (in fact, if you use a tool to record one or more
 streams into an `XDF` file, the stream info goes into the file header.
 */
+#[derive(Debug)]
 pub struct StreamInfo {
     handle: lsl_streaminfo,
 }
@@ -448,17 +449,19 @@ impl StreamInfo {
          `<v4address>`, `<v4data_port>`, `<v4service_port>`, `<v6address>`, `<v6data_port>`,
          `<v6service_port>`
        * the extended description element `<desc>` with user-defined sub-elements.
+
+    This is unlikely to fail, but could do so e.g. if running out of memory or possibly in case of
+    a library error.
     */
-    pub fn to_xml(&self) -> String {
+    pub fn to_xml(&self) -> Result<String> {
         unsafe {
             let tmpstr = lsl_get_xml(self.handle);
             if tmpstr.is_null() {
-                // this shouldn't really happen except in case of a fatal library error
-                panic!("lsl_get_xml failed for StreamInfo object.")
+                return Err(Error::Internal);
             }
             let result = ffi::CStr::from_ptr(tmpstr).to_string_lossy().into_owned();
             lsl_destroy_string(tmpstr);
-            result
+            Ok(result)
         }
     }
 
@@ -531,6 +534,12 @@ impl Clone for StreamInfo {
     }
 }
 
+impl fmt::Display for StreamInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(name={}, type={}, fmt={}, srate={})",
+               self.stream_name(), self.stream_type(), self.channel_format(), self.nominal_srate())
+    }
+}
 
 // =======================
 // ==== Stream Outlet ====
@@ -543,6 +552,7 @@ Outlets are used to make streaming data (and the meta-data) available on the lab
 The actual sample-pushing functionality is provided via the `Pushable` and `ExPushable` traits
 below.
 */
+#[derive(Debug)]
 pub struct StreamOutlet {
     // internal fields used by the Rust wrapper
     handle: lsl_outlet,
@@ -588,7 +598,9 @@ impl StreamOutlet {
 
     /**
     Check whether consumers are currently registered.
-    While it does not hurt, there is technically no reason to push samples if there is no consumer.
+
+    You can use this to disable sending data if there's no consumer (eg to save battery on an
+    embedded device) -- however, this is not necessary and most production clients do not use it.
     */
     pub fn have_consumers(&self) -> bool {
         unsafe {
@@ -597,10 +609,12 @@ impl StreamOutlet {
     }
 
     /**
-    Wait until some consumer shows up (without wasting resources).
+    Wait until some consumer shows up (without wasting resources, e.g., on embedded devices).
 
-    To have no timeout, you can use the value `lsl::FOREVER` here.
-    Returns True if the wait was successful, false if the timeout expired.
+    To have no timeout, you can use the value `lsl::FOREVER` here. Returns True if the wait was
+    successful, false if the timeout expired.
+
+    Note that it is not necessary to do this, and most production clients do not use this feature.
     */
     pub fn wait_for_consumers(&self, timeout: f64) -> bool {
         unsafe {
@@ -1050,6 +1064,7 @@ Inlets are used to receive streaming data (and meta-data) from the lab network.
 
 The actual sample-pulling functionality is provided via the `Pullable` trait below.
 */
+#[derive(Debug)]
 pub struct StreamInlet {
     // internal fields used by the Rust wrapper
     handle: lsl_inlet,
@@ -1148,11 +1163,11 @@ impl StreamInlet {
     /**
     Unsubscribe from the current data stream.
 
-    All samples that are still buffered or in flight will be dropped and transmission
-    and buffering of data for this inlet will be stopped. If an application stops being
-    interested in data from a source (temporarily or not) but keeps the outlet alive,
-    it should call `close_stream()` to not waste unnecessary system and network
-    resources.
+    All samples that are still buffered or in flight will be dropped and transmission and buffering
+    of data for this inlet will be stopped. If an application stops being interested in data from a
+    source (temporarily or not) but keeps the outlet alive, it should call `close_stream()` to not
+    waste unnecessary system and network resources. This feature is rarely used in practice since
+    it's often simpler to just discard the whole inlet and later recreate it.
     */
     pub fn close_stream(&self) {
         unsafe {
@@ -1510,6 +1525,7 @@ also https://pugixml.org/docs/manual.html#access for additional documentation.
 Note: any strings passed into this function must be valid UTF8-encoded strings and contain no
 intermittent zero bytes.
 */
+#[derive(Copy, Clone, Debug)]
 pub struct XMLElement {
     cursor: lsl_xml_ptr
 }
@@ -1730,6 +1746,19 @@ impl XMLElement {
     }
 }
 
+impl fmt::Display for XMLElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_valid() {
+            write!(f, "(name={}, value={}, parent name={})",
+                   self.name(), self.value(), self.parent().name())
+        } else {
+            write!(f, "(not valid)")
+        }
+    }
+}
+
+
+
 // =============================
 // ==== Continuous Resolver ====
 // =============================
@@ -1740,6 +1769,7 @@ A convenience class that resolves streams continuously in the background.
 This object can be queried at any time for the set of streams that are currently visible on the
 network.
 */
+#[derive(Debug)]
 pub struct ContinuousResolver {
     handle: lsl_continuous_resolver,
 }
@@ -1874,11 +1904,11 @@ impl Drop for ContinuousResolver {
 // ========================
 
 // internal signature of one of the lsl_push_sample_*tp functions
-type NativePushFunction<T> = unsafe extern "C" fn(*mut lsl_outlet_struct_,
+type NativePushFunction<T> = unsafe extern "C" fn(lsl_outlet,
                                                   *const T, f64, i32) -> i32;
 
 // internal signature of one of the lsl_pull_sample_* functions
-type NativePullFunction<T> = unsafe extern "C" fn(*mut lsl_inlet_struct_,
+type NativePullFunction<T> = unsafe extern "C" fn(lsl_inlet,
                                                   *mut T, i32, f64, *mut i32) -> f64;
 
 // helper functions for interop with native data types in the lsl_sys module
@@ -1915,6 +1945,22 @@ impl ChannelFormat {
     }
 }
 
+impl fmt::Display for ChannelFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ChannelFormat::Float32 => "float32",
+            ChannelFormat::Double64 => "double64",
+            ChannelFormat::String => "string",
+            ChannelFormat::Int32 => "int32",
+            ChannelFormat::Int16 => "int16",
+            ChannelFormat::Int8 => "int8",
+            ChannelFormat::Int64 => "int64",
+            ChannelFormat::Undefined => "undefined",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 // error type conversion
 impl From<ffi::NulError> for Error {
     fn from(_: ffi::NulError) -> Error {
@@ -1931,35 +1977,40 @@ impl fmt::Display for Error {
         // operation succeeded or failed. Note that `write!` uses syntax which
         // is very similar to `println!`.
         let msg = match self {
-            Error::Timeout => "The operation has timed out.",
-            Error::StreamLost => "The stream has been lost; to continue reading, you need to \
-                                  re-resolve it.",
-            Error::BadArgument => "An function argument was incorrectly specified.",
-            Error::ResourceCreation => "Resource creation failed.",
-            Error::Internal => "An internal error has occurred.",
-            Error::Unknown => "An unknown error has occurred."
+            Error::Timeout => "operation timed out",
+            Error::StreamLost => "stream has been lost",
+            Error::BadArgument => "incorrectly specified argument.",
+            Error::ResourceCreation => "resource creation failed.",
+            Error::Internal => "internal error in native library",
+            Error::Unknown => "unknown error"
         };
         write!(f, "{}", msg)
     }
 }
 
+/// Error trait for the custom Error enum.
+/// Since no further source information is available, this is omitted.
+impl std::error::Error for Error {}
+
+
 // Internal function that creates a CString from a well-formed utf8-encoded &str and panics if
-// the string contains inline zero bytes.
+// the string contains inline zero bytes. This function *panics* if a null byte is contained in s,
+// therefore this should only be used in APIs that do not return error values.
 fn make_cstring(s: &str) -> ffi::CString {
-    // if you're getting this, you passed a string containing 0 bytes to the library. Since C
-    // libraries cannot process such strings, this is a fatal error.
+    // If you're getting this, you passed a string containing 0 bytes to the library. In the
+    // context where it happened, this is a fatal error.
     ffi::CString::new(s).expect("Embedded zero bytes are invalid in strings passed to \
                                    liblsl.")
 }
 
 // Internal function that creates a String from a const char* returned by a trusted C routine.
-// Replaces invalid bytes by placeholder UTF8 characters.
+// Replaces invalid bytes by placeholder UTF8 characters. This function *panics* if a null pointer
+// is given it it, and therefore it should only be used with API return values where that's
+// unexpected, i.e., fatal.
 unsafe fn make_string(s: *const ::std::os::raw::c_char) -> String {
-    if s.is_null() {
-        // if this happens, the native library has returned a NULL pointer in a place where it
-        // shouldn't. this is most likely a fatal library bug.
-        panic!("Attemt to create a string from a NULL pointer.")
-    }
+    // If this happens, the native library has returned a NULL pointer in a place where it
+    // should not. This indicates a fatal library bug.
+    assert!(!s.is_null(), "Attemt to create a string from a NULL pointer.");
     ffi::CStr::from_ptr(s).to_string_lossy().into_owned()
 }
 
