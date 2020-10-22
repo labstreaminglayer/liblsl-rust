@@ -1,5 +1,4 @@
 /** Example program to show how to read a multi-channel time series from LSL. */
-
 use lsl;
 use lsl::Pullable; // trait used by the inlet
 

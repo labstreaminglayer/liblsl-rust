@@ -1,8 +1,7 @@
+use ::std::*;
 /** Example program to show Some advanced capabilities when reading data.*/
-
 use lsl;
-use lsl::Pullable; // trait used by the inlet
-use ::std::*;  // for user input
+use lsl::Pullable; // trait used by the inlet // for user input
 
 fn main() -> Result<(), lsl::Error> {
     println!("Resolving EEG stream...");
@@ -11,8 +10,7 @@ fn main() -> Result<(), lsl::Error> {
     // Some applications may use a finite timeout, e.g., 30 seconds, and some may also use a short
     // 2-3s timeout (assuming that the stream is already present), but allow more than one return
     // value and then to warn the user if there were multiple matching streams present.
-    let res = lsl::resolve_bypred("name='BioSemi' and type='EEG'", 1,
-                                                 lsl::FOREVER)?;
+    let res = lsl::resolve_bypred("name='BioSemi' and type='EEG'", 1, lsl::FOREVER)?;
 
     // Next we're creating an inlet to read from it. Let's say this is a real-time processing tool,
     // and we have no use for more than 10 seconds of data backlog accumulating in case our program
@@ -43,8 +41,10 @@ fn main() -> Result<(), lsl::Error> {
     // let's also suppose that we want to sync the received data's time stamps with our local_clock(),
     // e.g., to relate the data to some local events. We can enable that via post-processing, but
     // see also the inlet's time_correction() method for the manual way that gives you full control
-    inl.set_postprocessing(&[lsl::ProcessingOption::ClockSync, lsl::ProcessingOption::Dejitter])?;
-
+    inl.set_postprocessing(&[
+        lsl::ProcessingOption::ClockSync,
+        lsl::ProcessingOption::Dejitter,
+    ])?;
 
     // now we're reading data in a loop and print it as we go
     println!("Reading data...");

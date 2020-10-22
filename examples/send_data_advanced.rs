@@ -1,6 +1,5 @@
 /** Example program that demonstrates how to send a multi-channel time series with proper
 meta-data, and also some other advanced features. */
-
 use lsl;
 use lsl::ExPushable; // trait used for push_sample_ex method
 use rand::Rng; // since we're sending random data

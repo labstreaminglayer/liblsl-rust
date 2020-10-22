@@ -1,5 +1,4 @@
 /** Example program to demonstrate how to read string-valued markers from LSL.*/
-
 use lsl;
 use lsl::Pullable; // trait that provides the pull_sample method
 

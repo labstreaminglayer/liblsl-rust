@@ -1,6 +1,5 @@
 /** Example program showing how to read a multi-channel time-series in LSL in a chunk-by-chunk
 manner, which is an easy way to read in a non-blocking fashion.*/
-
 use lsl;
 use lsl::Pullable; // trait that provides the pull_chunk method
 

@@ -1,6 +1,5 @@
 /** Example program that shows how to send multi-channel data in chunks.
 This application pretends to stream data from a BioSemi (tm) EEG device into LSL. */
-
 use lsl;
 use lsl::Pushable; // trait used by the outlet object
 use rand::Rng; // since we're sending random data

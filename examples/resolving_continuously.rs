@@ -1,5 +1,4 @@
 /** Example program that shows how to continuously resolve streams on the network. */
-
 use lsl;
 
 fn main() -> Result<(), lsl::Error> {
@@ -13,7 +12,7 @@ fn main() -> Result<(), lsl::Error> {
         // instantaneous since it just returns a list that's updated internally by the resolver
         let infos = resolver.results()?;
         // get the names of those streams and print them
-        let names: Vec<_> = infos.iter().map(|x| { x.stream_name() }).collect();
+        let names: Vec<_> = infos.iter().map(|x| x.stream_name()).collect();
         println!("Currently visible: {:?}", names);
         // sleep a bit to not overload the cpu
         std::thread::sleep(std::time::Duration::from_millis(100));

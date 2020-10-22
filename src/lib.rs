@@ -26,11 +26,10 @@ github repository).
 */
 
 use lsl_sys::*;
+use std::convert::{From, TryFrom};
 use std::ffi;
 use std::fmt;
 use std::vec;
-use std::convert::{From, TryFrom};
-
 
 /// Constant to indicate that a stream has variable sampling rate.
 pub const IRREGULAR_RATE: f64 = 0.0;
@@ -52,7 +51,6 @@ operating systems (e.g., 32-bit UNIX).
 */
 pub const FOREVER: f64 = 32000000.0;
 
-
 /// Error type for all errors that can be returned by this library.
 #[derive(Copy, Clone, Debug)]
 pub enum Error {
@@ -72,13 +70,11 @@ pub enum Error {
     Internal,
     /// An unknown error has occurred. There are only very few calls where this can happen since no
     /// detailed error codes are available in those cases.
-    Unknown
+    Unknown,
 }
-
 
 /// Result type alias for results with library-specific errors.
 type Result<T> = std::result::Result<T, Error>;
-
 
 /// Data format of a channel (each transmitted sample holds an array of channels).
 #[derive(Copy, Clone, Debug)]
@@ -130,9 +126,8 @@ pub enum ProcessingOption {
     /// uses somewhat more CPU.
     Threadsafe = 8,
     /// The combination of all possible post-processing options.
-    ALL = 1|2|4|8
+    ALL = 1 | 2 | 4 | 8,
 }
-
 
 /**
 Protocol version number.
@@ -144,9 +139,7 @@ different major versions will refuse to work together (as of this writing, all v
 compatible with each other).
 */
 pub fn protocol_version() -> i32 {
-    unsafe {
-        lsl_protocol_version()
-    }
+    unsafe { lsl_protocol_version() }
 }
 
 /**
@@ -155,11 +148,8 @@ Version number of the liblsl library.
 - The minor version is library_version() % 100;
 */
 pub fn library_version() -> i32 {
-    unsafe {
-        lsl_library_version()
-    }
+    unsafe { lsl_library_version() }
 }
-
 
 /**
 Get a string containing library/build information.
@@ -168,11 +158,8 @@ The format is considered an implementation detail and may change. This is mostly
 debugging potential ABI or version issues.
 */
 pub fn library_info() -> String {
-    unsafe {
-        make_string(lsl_library_info())
-    }
+    unsafe { make_string(lsl_library_info()) }
 }
-
 
 /**
 Obtain a local system time stamp in seconds.
@@ -189,11 +176,8 @@ offset to `local_clock()` to obtain a better (back-dated) estimate of when a sam
 captured. See `StreamOutlet::push_sample()` for a use case.
 */
 pub fn local_clock() -> f64 {
-    unsafe {
-        lsl_local_clock()
-    }
+    unsafe { lsl_local_clock() }
 }
-
 
 // ==========================
 // === Stream Declaration ===
@@ -256,11 +240,16 @@ impl StreamInfo {
     This can fail with an `Error::BadArgument` variant or in extremely rare cases with an
     `Error::ResourceCreation` (e.g., in case of an out of memory).
     */
-    pub fn new(stream_name: &str, stream_type: &str, channel_count: u32, nominal_srate: f64,
-               channel_format: ChannelFormat, source_id: &str) -> Result<StreamInfo>
-    {
+    pub fn new(
+        stream_name: &str,
+        stream_type: &str,
+        channel_count: u32,
+        nominal_srate: f64,
+        channel_format: ChannelFormat,
+        source_id: &str,
+    ) -> Result<StreamInfo> {
         if stream_name.is_empty() || nominal_srate < 0.0 || channel_count >= 0x80000000 {
-            return Err(Error::BadArgument)
+            return Err(Error::BadArgument);
         }
         let stream_name = ffi::CString::new(stream_name)?;
         let stream_type = ffi::CString::new(stream_type)?;
@@ -272,11 +261,11 @@ impl StreamInfo {
                 channel_count as i32,
                 nominal_srate,
                 channel_format.to_native(),
-                source_id.as_ptr()
+                source_id.as_ptr(),
             );
             match handle.is_null() {
                 false => Ok(StreamInfo { handle }),
-                true => Err(Error::ResourceCreation)
+                true => Err(Error::ResourceCreation),
             }
         }
     }
@@ -295,9 +284,7 @@ impl StreamInfo {
     experimenter).
     */
     pub fn stream_name(&self) -> String {
-        unsafe {
-            make_string(lsl_get_name(self.handle))
-        }
+        unsafe { make_string(lsl_get_name(self.handle)) }
     }
 
     /**
@@ -310,9 +297,7 @@ impl StreamInfo {
     search for: XDF meta-data).
     */
     pub fn stream_type(&self) -> String {
-        unsafe {
-            make_string(lsl_get_type(self.handle))
-        }
+        unsafe { make_string(lsl_get_type(self.handle)) }
     }
 
     /**
@@ -320,9 +305,7 @@ impl StreamInfo {
     A stream has at least one channel; the channel count stays constant for all samples.
     */
     pub fn channel_count(&self) -> i32 {
-        unsafe {
-            lsl_get_channel_count(self.handle)
-        }
+        unsafe { lsl_get_channel_count(self.handle) }
     }
 
     /**
@@ -336,9 +319,7 @@ impl StreamInfo {
     of the device.
     */
     pub fn nominal_srate(&self) -> f64 {
-        unsafe {
-            lsl_get_nominal_srate(self.handle)
-        }
+        unsafe { lsl_get_nominal_srate(self.handle) }
     }
 
     /**
@@ -347,9 +328,7 @@ impl StreamInfo {
     time-synched streams each with its own format.
     */
     pub fn channel_format(&self) -> ChannelFormat {
-        unsafe {
-            ChannelFormat::from_native(lsl_get_channel_format(self.handle))
-        }
+        unsafe { ChannelFormat::from_native(lsl_get_channel_format(self.handle)) }
     }
 
     /** Unique identifier of the stream's source, if available.
@@ -358,9 +337,7 @@ impl StreamInfo {
     automatically once it is back online.
     */
     pub fn source_id(&self) -> String {
-        unsafe {
-            make_string(lsl_get_source_id(self.handle))
-        }
+        unsafe { make_string(lsl_get_source_id(self.handle)) }
     }
 
     // ======================================
@@ -368,14 +345,11 @@ impl StreamInfo {
     // ======================================
     // (these fields are implicitly assigned once bound to an outlet/inlet)
 
-
     /**
     Protocol version used to deliver the stream. Formatted like `lsl::protocol_version()`.
     */
     pub fn version(&self) -> i32 {
-        unsafe {
-            lsl_get_version(self.handle)
-        }
+        unsafe { lsl_get_version(self.handle) }
     }
 
     /**
@@ -384,9 +358,7 @@ impl StreamInfo {
     (as determined via `lsl::local_clock()` on the providing machine).
     */
     pub fn created_at(&self) -> f64 {
-        unsafe {
-            lsl_get_created_at(self.handle)
-        }
+        unsafe { lsl_get_created_at(self.handle) }
     }
 
     /**
@@ -395,9 +367,7 @@ impl StreamInfo {
     across multiple instantiations of the same outlet (e.g., after a re-start).
     */
     pub fn uid(&self) -> String {
-        unsafe {
-            make_string(lsl_get_uid(self.handle))
-        }
+        unsafe { make_string(lsl_get_uid(self.handle)) }
     }
 
     /**
@@ -409,18 +379,14 @@ impl StreamInfo {
     wiki).
     */
     pub fn session_id(&self) -> String {
-        unsafe {
-            make_string(lsl_get_session_id(self.handle))
-        }
+        unsafe { make_string(lsl_get_session_id(self.handle)) }
     }
 
     /**
     Hostname of the providing machine.
     */
     pub fn hostname(&self) -> String {
-        unsafe {
-            make_string(lsl_get_hostname(self.handle))
-        }
+        unsafe { make_string(lsl_get_hostname(self.handle)) }
     }
 
     // ========================
@@ -442,7 +408,9 @@ impl StreamInfo {
     */
     pub fn desc(&self) -> XMLElement {
         unsafe {
-            XMLElement { cursor: lsl_get_desc(self.handle) }
+            XMLElement {
+                cursor: lsl_get_desc(self.handle),
+            }
         }
     }
 
@@ -452,9 +420,7 @@ impl StreamInfo {
     */
     pub fn matches_query(&self, query: &str) -> bool {
         if let Ok(query) = ffi::CString::new(query) {
-            unsafe {
-                lsl_stream_info_matches_query(self.handle, query.as_ptr()) != 0
-            }
+            unsafe { lsl_stream_info_matches_query(self.handle, query.as_ptr()) != 0 }
         } else {
             false
         }
@@ -493,22 +459,17 @@ impl StreamInfo {
 
     /// Number of bytes occupied by a channel (0 for string-typed channels).
     pub fn channel_bytes(&self) -> i32 {
-        unsafe {
-            lsl_get_channel_bytes(self.handle)
-        }
+        unsafe { lsl_get_channel_bytes(self.handle) }
     }
 
     /// Number of bytes occupied by a sample (0 for string-typed channels).
     pub fn sample_bytes(&self) -> i32 {
-        unsafe {
-            lsl_get_sample_bytes(self.handle)
-        }
+        unsafe { lsl_get_sample_bytes(self.handle) }
     }
 
     /// Construct a blank `StreamInfo`.
     pub fn from_blank() -> Result<StreamInfo> {
-        StreamInfo::new("untitled", "", 0, 0.0,
-                        ChannelFormat::Undefined, "")
+        StreamInfo::new("untitled", "", 0, 0.0, ChannelFormat::Undefined, "")
     }
 
     /**
@@ -523,11 +484,10 @@ impl StreamInfo {
             let handle = lsl_streaminfo_from_xml(xml.as_ptr());
             match handle.is_null() {
                 false => Ok(StreamInfo { handle }),
-                true => Err(Error::ResourceCreation)
+                true => Err(Error::ResourceCreation),
             }
         }
     }
-
 
     /// Get the native implementation handle. Internal but exposed to allow experimental uses.
     #[doc(hidden)]
@@ -542,7 +502,10 @@ impl StreamInfo {
     internal since you can only get such a handle by calling raw native C library functions.
     */
     fn from_handle(handle: lsl_streaminfo) -> StreamInfo {
-        assert!(!handle.is_null(), "Attempted to create a StreamInfo from a NULL handle.");
+        assert!(
+            !handle.is_null(),
+            "Attempted to create a StreamInfo from a NULL handle."
+        );
         StreamInfo { handle }
     }
 }
@@ -559,7 +522,10 @@ impl Clone for StreamInfo {
     fn clone(&self) -> StreamInfo {
         unsafe {
             let handle = lsl_copy_streaminfo(self.handle);
-            assert!(!handle.is_null(), "Failed to clone native lsl_streaminfo object.");
+            assert!(
+                !handle.is_null(),
+                "Failed to clone native lsl_streaminfo object."
+            );
             StreamInfo { handle }
         }
     }
@@ -567,8 +533,14 @@ impl Clone for StreamInfo {
 
 impl fmt::Display for StreamInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(name={}, type={}, fmt={}, srate={})",
-               self.stream_name(), self.stream_type(), self.channel_format(), self.nominal_srate())
+        write!(
+            f,
+            "(name={}, type={}, fmt={}, srate={})",
+            self.stream_name(),
+            self.stream_type(),
+            self.channel_format(),
+            self.nominal_srate()
+        )
     }
 }
 
@@ -618,12 +590,14 @@ impl StreamOutlet {
             return Err(Error::BadArgument);
         }
         unsafe {
-            let handle = lsl_create_outlet(
-                info.native_handle(),
-                chunk_size as i32,
-                max_buffered as i32);
+            let handle =
+                lsl_create_outlet(info.native_handle(), chunk_size as i32, max_buffered as i32);
             match handle.is_null() {
-                false => Ok(StreamOutlet { handle, channel_count, nominal_rate }),
+                false => Ok(StreamOutlet {
+                    handle,
+                    channel_count,
+                    nominal_rate,
+                }),
                 true => Err(Error::ResourceCreation),
             }
         }
@@ -640,9 +614,7 @@ impl StreamOutlet {
     embedded device) -- however, this is not necessary and most production clients do not use it.
     */
     pub fn have_consumers(&self) -> bool {
-        unsafe {
-            lsl_have_consumers(self.handle) != 0
-        }
+        unsafe { lsl_have_consumers(self.handle) != 0 }
     }
 
     /**
@@ -654,9 +626,7 @@ impl StreamOutlet {
     Note that it is not necessary to do this, and most production clients do not use this feature.
     */
     pub fn wait_for_consumers(&self, timeout: f64) -> bool {
-        unsafe {
-            lsl_wait_for_consumers(self.handle, timeout) != 0
-        }
+        unsafe { lsl_wait_for_consumers(self.handle, timeout) != 0 }
     }
 
     /**
@@ -675,19 +645,22 @@ impl StreamOutlet {
                 // the handle already refers to a copy the outlet's info object so this operation
                 // is trivial
                 false => Ok(StreamInfo::from_handle(info_handle)),
-                true => Err(Error::ResourceCreation)
+                true => Err(Error::ResourceCreation),
             }
         }
     }
-
 
     // --- internal methods ---
 
     // Internal utility function that checks whether a given length value matches the channel count
     fn assert_len(&self, len: usize) {
         // we use assert since that's almost surely a sign of a fatal application bug
-        assert_eq!(len, self.channel_count, "StreamOutlet received data whose length {} does not \
-                   match the outlet's channel count {}", len, self.channel_count);
+        assert_eq!(
+            len, self.channel_count,
+            "StreamOutlet received data whose length {} does not \
+                   match the outlet's channel count {}",
+            len, self.channel_count
+        );
     }
 
     /*
@@ -705,8 +678,13 @@ impl StreamOutlet {
     This can fail potentially with a (very unlikely) `Error::Internal` in case of a library
     problem.
     */
-    fn safe_push_numeric<T>(&self, func: NativePushFunction<T>, data: &vec::Vec<T>, timestamp: f64,
-                            pushthrough: bool) -> Result<()> {
+    fn safe_push_numeric<T>(
+        &self,
+        func: NativePushFunction<T>,
+        data: &vec::Vec<T>,
+        timestamp: f64,
+        pushthrough: bool,
+    ) -> Result<()> {
         self.assert_len(data.len());
         unsafe {
             ec_to_result(func(self.handle, data.as_ptr(), timestamp, pushthrough as i32))?;
@@ -728,20 +706,26 @@ impl StreamOutlet {
 
     This can fail potentially with a (very unlikely) Error::Internal in case of a library problem.
     */
-    fn safe_push_blob<T: AsRef<[u8]>>(&self, data: &vec::Vec<T>, timestamp: f64,
-                                      pushthrough: bool) -> Result<()> {
+    fn safe_push_blob<T: AsRef<[u8]>>(
+        &self,
+        data: &vec::Vec<T>,
+        timestamp: f64,
+        pushthrough: bool,
+    ) -> Result<()> {
         self.assert_len(data.len());
-        let ptrs: Vec<_> = data.iter().map(
-            |x| {x.as_ref().as_ptr()}).collect();
-        let lens: Vec<_> = data.iter().map(
-            |x| {u32::try_from(x.as_ref().len()).unwrap()}).collect();
+        let ptrs: Vec<_> = data.iter().map(|x| x.as_ref().as_ptr()).collect();
+        let lens: Vec<_> = data
+            .iter()
+            .map(|x| u32::try_from(x.as_ref().len()).unwrap())
+            .collect();
         unsafe {
             ec_to_result(lsl_push_sample_buftp(
                 self.handle,
                 ptrs.as_ptr() as *mut *const std::os::raw::c_char,
                 lens.as_ptr(),
                 timestamp,
-                pushthrough as i32))?;
+                pushthrough as i32,
+            ))?;
         }
         Ok(())
     }
@@ -774,7 +758,6 @@ pub trait Pushable<T> {
     */
     fn push_sample(&self, data: &T) -> Result<()>;
 
-
     /**
     Push a chunk of samples (batched into a `Vec`) into the outlet. Each element of the given
     vector must itself be in a format accepted by `push_sample()` (e.g., `Vec`).
@@ -806,8 +789,7 @@ pub trait Pushable<T> {
 // Pushable is basically a convenience layer on top of ExPushable
 impl<T, U: ExPushable<T>> Pushable<T> for U {
     fn push_sample(&self, data: &T) -> Result<()> {
-        self.push_sample_ex(data, 0.0,
-                            true)
+        self.push_sample_ex(data, 0.0, true)
     }
 
     fn push_chunk(&self, data: &vec::Vec<T>) -> Result<()> {
@@ -833,7 +815,6 @@ If you push in data that as the wrong size (array length not matching the declar
 channels), these functions will trigger an assert.
 */
 pub trait ExPushable<T>: HasNominalRate {
-
     /**
     Push a vector of values of some type as a sample into the outlet.
     Each entry in the vector corresponds to one channel. The function handles type checking &
@@ -867,22 +848,28 @@ pub trait ExPushable<T>: HasNominalRate {
     See also `push_chunk()` for a simpler variant with default values for `timestamp` and
     `pushthrough` (defined in `Pushable` trait).
     */
-    fn push_chunk_ex(&self, samples: &vec::Vec<T>, timestamp: f64,
-                     pushthrough: bool) -> Result<()> {
+    fn push_chunk_ex(
+        &self,
+        samples: &vec::Vec<T>,
+        timestamp: f64,
+        pushthrough: bool,
+    ) -> Result<()> {
         if !samples.is_empty() {
-            let mut timestamp = if timestamp == 0.0 { local_clock() } else { timestamp };
+            let mut timestamp = if timestamp == 0.0 {
+                local_clock()
+            } else {
+                timestamp
+            };
             let srate = self.nominal_srate();
             let max_k = samples.len() - 1;
             // push first sample with calulated timestamp
             if srate != IRREGULAR_RATE {
                 timestamp -= (max_k as f64) / srate;
             }
-            self.push_sample_ex(&samples[0], timestamp,
-                                pushthrough && (samples.len() == 1))?;
+            self.push_sample_ex(&samples[0], timestamp, pushthrough && (samples.len() == 1))?;
             // push successive samples with deduced stamp
             for k in 1..=max_k {
-                self.push_sample_ex(&samples[k], DEDUCED_TIMESTAMP,
-                                    pushthrough && (k == max_k))?;
+                self.push_sample_ex(&samples[k], DEDUCED_TIMESTAMP, pushthrough && (k == max_k))?;
             }
         }
         Ok(())
@@ -899,10 +886,14 @@ pub trait ExPushable<T>: HasNominalRate {
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
     */
-    fn push_chunk_stamped_ex(&self, samples: &vec::Vec<T>, timestamps: &vec::Vec<f64>,
-                             pushthrough: bool) -> Result<()> {
+    fn push_chunk_stamped_ex(
+        &self,
+        samples: &vec::Vec<T>,
+        timestamps: &vec::Vec<f64>,
+        pushthrough: bool,
+    ) -> Result<()> {
         assert_eq!(samples.len(), timestamps.len());
-        let max_k = samples.len()-1;
+        let max_k = samples.len() - 1;
         // send all except last sample
         for k in 0..max_k {
             self.push_sample_ex(&samples[k], timestamps[k], false)?;
@@ -990,7 +981,6 @@ impl HasNominalRate for StreamOutlet {
     }
 }
 
-
 // ===========================
 // ==== Resolve Functions ====
 // ===========================
@@ -1025,9 +1015,12 @@ pub fn resolve_streams(wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
         let num_resolved = ec_to_result(lsl_resolve_all(
             buffer.as_mut_ptr(),
             buffer.len() as u32,
-            wait_time))? as usize;
-        let results: Vec<_> = buffer[0..num_resolved].iter().map(
-            |x| {StreamInfo::from_handle(*x)}).collect();
+            wait_time,
+        ))? as usize;
+        let results: Vec<_> = buffer[0..num_resolved]
+            .iter()
+            .map(|x| StreamInfo::from_handle(*x))
+            .collect();
         Ok(results)
     }
 }
@@ -1059,8 +1052,12 @@ and/or library problem.
 **Examples: the `receive_*.rs` examples (found in the crate's github repository) illustrate
 the use of the resolve functions.
 */
-pub fn resolve_byprop(prop: &str, value: &str, minimum: i32,
-                      wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
+pub fn resolve_byprop(
+    prop: &str,
+    value: &str,
+    minimum: i32,
+    wait_time: f64,
+) -> Result<vec::Vec<StreamInfo>> {
     // the fixed-size buffer is safe since the native function uses it as the max number of results
     let mut buffer = [0 as lsl_streaminfo; 1024];
     let prop = ffi::CString::new(prop)?;
@@ -1072,13 +1069,15 @@ pub fn resolve_byprop(prop: &str, value: &str, minimum: i32,
             prop.as_ptr(),
             value.as_ptr(),
             minimum,
-            wait_time))? as usize;
-        let results: Vec<_> = buffer[0..num_resolved].iter().map(
-            |x| {StreamInfo::from_handle(*x)}).collect();
+            wait_time,
+        ))? as usize;
+        let results: Vec<_> = buffer[0..num_resolved]
+            .iter()
+            .map(|x| StreamInfo::from_handle(*x))
+            .collect();
         Ok(results)
     }
 }
-
 
 /**
 Resolve all streams that match a given predicate.
@@ -1118,13 +1117,15 @@ pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> Result<vec::V
             buffer.len() as u32,
             pred.as_ptr(),
             minimum,
-            wait_time))? as usize;
-        let results: Vec<_> = buffer[0..num_resolved].iter().map(
-            |x| {StreamInfo::from_handle(*x)}).collect();
+            wait_time,
+        ))? as usize;
+        let results: Vec<_> = buffer[0..num_resolved]
+            .iter()
+            .map(|x| StreamInfo::from_handle(*x))
+            .collect();
         Ok(results)
     }
 }
-
 
 // ======================
 // ==== Stream Inlet ====
@@ -1174,17 +1175,28 @@ impl StreamInlet {
     This can fail with an `Error::BadArgument` or or in extremely rare cases (e.g., out of mem)
     with an `Error::ResourceCreation`.
     */
-    pub fn new(info: &StreamInfo, max_buflen: i32, max_chunklen: i32,
-               recover: bool) -> Result<StreamInlet> {
+    pub fn new(
+        info: &StreamInfo,
+        max_buflen: i32,
+        max_chunklen: i32,
+        recover: bool,
+    ) -> Result<StreamInlet> {
         let channel_count = info.channel_count() as usize;
         if max_buflen < 0 || max_chunklen < 0 || channel_count >= 0x80000000 {
             return Err(Error::BadArgument);
         }
         unsafe {
-            let handle = lsl_create_inlet(info.native_handle(), max_buflen,
-                                                            max_chunklen, recover as i32);
+            let handle = lsl_create_inlet(
+                info.native_handle(),
+                max_buflen,
+                max_chunklen,
+                recover as i32,
+            );
             match handle.is_null() {
-                false => Ok(StreamInlet { handle, channel_count }),
+                false => Ok(StreamInlet {
+                    handle,
+                    channel_count,
+                }),
                 true => Err(Error::ResourceCreation),
             }
         }
@@ -1205,8 +1217,7 @@ impl StreamInlet {
     pub fn info(&self, timeout: f64) -> Result<StreamInfo> {
         let mut ec = [0 as i32];
         unsafe {
-            let handle = lsl_get_fullinfo(self.handle, timeout,
-                                                            ec.as_mut_ptr());
+            let handle = lsl_get_fullinfo(self.handle, timeout, ec.as_mut_ptr());
             ec_to_result(ec[0])?;
             match handle.is_null() {
                 false => Ok(StreamInfo::from_handle(handle)),
@@ -1327,7 +1338,8 @@ impl StreamInlet {
                 retvals[0..].as_mut_ptr(),
                 retvals[1..].as_mut_ptr(),
                 timeout,
-                ec.as_mut_ptr());
+                ec.as_mut_ptr(),
+            );
             ec_to_result(ec[0])?;
             Ok((result, retvals[0], retvals[1]))
         }
@@ -1372,9 +1384,7 @@ impl StreamInlet {
     samples available (otherwise it will be 1 or 0).
     */
     pub fn samples_available(&self) -> u32 {
-        unsafe {
-            lsl_samples_available(self.handle) as u32
-        }
+        unsafe { lsl_samples_available(self.handle) as u32 }
     }
 
     /**
@@ -1386,9 +1396,7 @@ impl StreamInlet {
     measurements.
     */
     pub fn was_clock_reset(&self) -> bool {
-        unsafe {
-            lsl_was_clock_reset(self.handle) != 0
-        }
+        unsafe { lsl_was_clock_reset(self.handle) != 0 }
     }
 
     /**
@@ -1417,8 +1425,11 @@ impl StreamInlet {
 
     This can return an Error::StreamLost and potentially an Error::Internal.
     */
-    fn safe_pull_numeric<T: Clone + From<i8>>(&self, func: NativePullFunction<T>,
-                                              timeout: f64) -> Result<(vec::Vec<T>, f64)> {
+    fn safe_pull_numeric<T: Clone + From<i8>>(
+        &self,
+        func: NativePullFunction<T>,
+        timeout: f64,
+    ) -> Result<(vec::Vec<T>, f64)> {
         let mut ec = [0 as i32];
         let mut result = vec![T::from(0); self.channel_count];
         unsafe {
@@ -1427,7 +1438,8 @@ impl StreamInlet {
                 result.as_mut_ptr(),
                 result.len() as i32,
                 timeout,
-                ec.as_mut_ptr());
+                ec.as_mut_ptr(),
+            );
             ec_to_result(ec[0])?;
             if ts == 0.0 {
                 result.clear();
@@ -1446,8 +1458,11 @@ impl StreamInlet {
 
     This can return an Error::StreamLost and potentially an Error::Internal.
     */
-    fn safe_pull_blob<T: Clone>(&self, mapper: fn(&[u8]) -> T,
-                                timeout: f64) -> Result<(vec::Vec<T>, f64)> {
+    fn safe_pull_blob<T: Clone>(
+        &self,
+        mapper: fn(&[u8]) -> T,
+        timeout: f64,
+    ) -> Result<(vec::Vec<T>, f64)> {
         let mut ec = [0 as i32];
         let mut ptrs = vec![0 as *mut ::std::os::raw::c_char; self.channel_count];
         let mut lens = vec![0 as u32; self.channel_count];
@@ -1458,13 +1473,13 @@ impl StreamInlet {
                 lens.as_mut_ptr(),
                 ptrs.len() as i32,
                 timeout,
-                ec.as_mut_ptr());
+                ec.as_mut_ptr(),
+            );
             ec_to_result(ec[0])?;
             let mut sample = vec::Vec::<T>::new();
             if ts != 0.0 {
                 for k in 0..ptrs.len() {
-                    let slice = std::slice::from_raw_parts(ptrs[k] as *const u8,
-                                                                 lens[k] as usize);
+                    let slice = std::slice::from_raw_parts(ptrs[k] as *const u8, lens[k] as usize);
                     sample.push(mapper(slice));
                     lsl_destroy_string(ptrs[k]);
                 }
@@ -1482,13 +1497,11 @@ impl Drop for StreamInlet {
     }
 }
 
-
 /**
 A trait that enables the methods `pull_sample<T>()` and `pull_chunk<T>()`.
 Implemented by StreamInlet.
 */
 pub trait Pullable<T> {
-
     /**
     Pull the next successive sample from an inlet and read it into a vector of values.
 
@@ -1539,7 +1552,7 @@ pub trait Pullable<T> {
                 samples.push(sample);
                 stamps.push(stamp);
             } else {
-                break // no more data
+                break; // no more data
             }
         }
         Ok((samples, stamps))
@@ -1585,17 +1598,15 @@ impl Pullable<i8> for StreamInlet {
 
 impl Pullable<String> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<String>, f64)> {
-        self.safe_pull_blob(|x| { String::from_utf8_lossy(x).into_owned() },
-                            timeout)
+        self.safe_pull_blob(|x| String::from_utf8_lossy(x).into_owned(), timeout)
     }
 }
 
 impl Pullable<vec::Vec<u8>> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<vec::Vec<u8>>, f64)> {
-        self.safe_pull_blob(|x| { x.to_vec() }, timeout)
+        self.safe_pull_blob(|x| x.to_vec(), timeout)
     }
 }
-
 
 // =====================
 // ==== XML Element ====
@@ -1625,48 +1636,56 @@ use of `XMLElement` cursors.
 */
 #[derive(Copy, Clone, Debug)]
 pub struct XMLElement {
-    cursor: lsl_xml_ptr
+    cursor: lsl_xml_ptr,
 }
 
 impl XMLElement {
-
     // === Tree Navigation ===
 
     /// Get the first child of the element.
     pub fn first_child(&self) -> XMLElement {
         unsafe {
-            XMLElement { cursor: lsl_first_child(self.cursor) }
+            XMLElement {
+                cursor: lsl_first_child(self.cursor),
+            }
         }
     }
 
     /// Get the last child of the element.
     pub fn last_child(&self) -> XMLElement {
         unsafe {
-            XMLElement { cursor: lsl_last_child(self.cursor) }
+            XMLElement {
+                cursor: lsl_last_child(self.cursor),
+            }
         }
     }
 
     /// Get the next sibling in the children list of the parent node.
     pub fn next_sibling(&self) -> XMLElement {
         unsafe {
-            XMLElement { cursor: lsl_next_sibling(self.cursor) }
+            XMLElement {
+                cursor: lsl_next_sibling(self.cursor),
+            }
         }
     }
 
     /// Get the previous sibling in the children list of the parent node.
     pub fn previous_sibling(&self) -> XMLElement {
         unsafe {
-            XMLElement { cursor: lsl_previous_sibling(self.cursor) }
+            XMLElement {
+                cursor: lsl_previous_sibling(self.cursor),
+            }
         }
     }
 
     /// Get the parent node.
     pub fn parent(&self) -> XMLElement {
         unsafe {
-            XMLElement { cursor: lsl_parent(self.cursor) }
+            XMLElement {
+                cursor: lsl_parent(self.cursor),
+            }
         }
     }
-
 
     // === Tree Navigation by Name ===
 
@@ -1674,7 +1693,9 @@ impl XMLElement {
     pub fn child(&self, name: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
-            XMLElement { cursor: lsl_child(self.cursor, name.as_ptr()) }
+            XMLElement {
+                cursor: lsl_child(self.cursor, name.as_ptr()),
+            }
         }
     }
 
@@ -1682,7 +1703,9 @@ impl XMLElement {
     pub fn next_sibling_named(&self, name: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
-            XMLElement { cursor: lsl_next_sibling_n(self.cursor, name.as_ptr()) }
+            XMLElement {
+                cursor: lsl_next_sibling_n(self.cursor, name.as_ptr()),
+            }
         }
     }
 
@@ -1690,47 +1713,38 @@ impl XMLElement {
     pub fn previous_sibling_named(&self, name: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
-            XMLElement { cursor: lsl_previous_sibling_n(self.cursor, name.as_ptr()) }
+            XMLElement {
+                cursor: lsl_previous_sibling_n(self.cursor, name.as_ptr()),
+            }
         }
     }
-
 
     // === Content Queries ===
 
     /// Whether this node is empty.
     pub fn empty(&self) -> bool {
-        unsafe {
-            lsl_empty(self.cursor) != 0
-        }
+        unsafe { lsl_empty(self.cursor) != 0 }
     }
 
     /// Whether this is a text body (instead of an XML element). True both for plain char
     /// data and CData.
     pub fn is_text(&self) -> bool {
-        unsafe {
-            lsl_is_text(self.cursor) != 0
-        }
+        unsafe { lsl_is_text(self.cursor) != 0 }
     }
 
     /// Name of the element.
     pub fn name(&self) -> String {
-        unsafe {
-            make_string(lsl_name(self.cursor))
-        }
+        unsafe { make_string(lsl_name(self.cursor)) }
     }
 
     /// Value of the element.
     pub fn value(&self) -> String {
-        unsafe {
-            make_string(lsl_value(self.cursor))
-        }
+        unsafe { make_string(lsl_value(self.cursor)) }
     }
 
     /// Get child value (value of the first child that is text).
     pub fn child_value(&self) -> String {
-        unsafe {
-            make_string(lsl_child_value(self.cursor))
-        }
+        unsafe { make_string(lsl_child_value(self.cursor)) }
     }
 
     /// Get child value of a child with a specified name.
@@ -1741,7 +1755,6 @@ impl XMLElement {
         }
     }
 
-
     // === Modification ===
 
     /// Append a child node with a given name, which has a (nameless) plain-text child with
@@ -1750,9 +1763,9 @@ impl XMLElement {
         unsafe {
             let name = make_cstring(name);
             let value = make_cstring(value);
-            XMLElement { cursor: lsl_append_child_value(self.cursor,
-                                                        name.as_ptr(),
-                                                        value.as_ptr()) }
+            XMLElement {
+                cursor: lsl_append_child_value(self.cursor, name.as_ptr(), value.as_ptr()),
+            }
         }
     }
 
@@ -1762,9 +1775,9 @@ impl XMLElement {
         unsafe {
             let name = make_cstring(name);
             let value = make_cstring(value);
-            XMLElement { cursor: lsl_prepend_child_value(self.cursor,
-                                                         name.as_ptr(),
-                                                         value.as_ptr()) }
+            XMLElement {
+                cursor: lsl_prepend_child_value(self.cursor, name.as_ptr(), value.as_ptr()),
+            }
         }
     }
 
@@ -1797,7 +1810,9 @@ impl XMLElement {
     pub fn append_child(&self, name: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
-            XMLElement { cursor: lsl_append_child(self.cursor, name.as_ptr()) }
+            XMLElement {
+                cursor: lsl_append_child(self.cursor, name.as_ptr()),
+            }
         }
     }
 
@@ -1805,21 +1820,27 @@ impl XMLElement {
     pub fn prepend_child(&self, name: &str) -> XMLElement {
         unsafe {
             let name = make_cstring(name);
-            XMLElement { cursor: lsl_prepend_child(self.cursor, name.as_ptr()) }
+            XMLElement {
+                cursor: lsl_prepend_child(self.cursor, name.as_ptr()),
+            }
         }
     }
 
     /// Append a copy of the specified element as a child.
     pub fn append_copy(&self, e: XMLElement) -> XMLElement {
         unsafe {
-            XMLElement { cursor: lsl_append_copy(self.cursor, e.cursor) }
+            XMLElement {
+                cursor: lsl_append_copy(self.cursor, e.cursor),
+            }
         }
     }
 
     /// Prepend a child element with the specified name.
     pub fn prepend_copy(&self, e: XMLElement) -> XMLElement {
         unsafe {
-            XMLElement { cursor: lsl_prepend_copy(self.cursor, e.cursor) }
+            XMLElement {
+                cursor: lsl_prepend_copy(self.cursor, e.cursor),
+            }
         }
     }
 
@@ -1847,15 +1868,18 @@ impl XMLElement {
 impl fmt::Display for XMLElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_valid() {
-            write!(f, "(name={}, value={}, parent name={})",
-                   self.name(), self.value(), self.parent().name())
+            write!(
+                f,
+                "(name={}, value={}, parent name={})",
+                self.name(),
+                self.value(),
+                self.parent().name()
+            )
         } else {
             write!(f, "(not valid)")
         }
     }
 }
-
-
 
 // =============================
 // ==== Continuous Resolver ====
@@ -1898,7 +1922,7 @@ impl ContinuousResolver {
             let handle = lsl_create_continuous_resolver(forget_after);
             match handle.is_null() {
                 false => Ok(ContinuousResolver { handle }),
-                true => Err(Error::ResourceCreation)
+                true => Err(Error::ResourceCreation),
             }
         }
     }
@@ -1926,11 +1950,11 @@ impl ContinuousResolver {
         let prop = ffi::CString::new(prop)?;
         let value = ffi::CString::new(value)?;
         unsafe {
-            let handle = lsl_create_continuous_resolver_byprop(
-                prop.as_ptr(), value.as_ptr(), forget_after);
+            let handle =
+                lsl_create_continuous_resolver_byprop(prop.as_ptr(), value.as_ptr(), forget_after);
             match handle.is_null() {
                 false => Ok(ContinuousResolver { handle }),
-                true => Err(Error::ResourceCreation)
+                true => Err(Error::ResourceCreation),
             }
         }
     }
@@ -1957,11 +1981,10 @@ impl ContinuousResolver {
         }
         let pred = ffi::CString::new(pred)?;
         unsafe {
-            let handle = lsl_create_continuous_resolver_bypred(
-                pred.as_ptr(), forget_after);
+            let handle = lsl_create_continuous_resolver_bypred(pred.as_ptr(), forget_after);
             match handle.is_null() {
                 false => Ok(ContinuousResolver { handle }),
-                true => Err(Error::ResourceCreation)
+                true => Err(Error::ResourceCreation),
             }
         }
     }
@@ -1983,9 +2006,12 @@ impl ContinuousResolver {
             let num_resolved = ec_to_result(lsl_resolver_results(
                 self.handle,
                 buffer.as_mut_ptr(),
-                buffer.len() as u32))? as usize;
-            let results: Vec<_> = buffer[0..num_resolved].iter().map(
-                |x| {StreamInfo::from_handle(*x)}).collect();
+                buffer.len() as u32,
+            ))? as usize;
+            let results: Vec<_> = buffer[0..num_resolved]
+                .iter()
+                .map(|x| StreamInfo::from_handle(*x))
+                .collect();
             Ok(results)
         }
     }
@@ -1999,18 +2025,15 @@ impl Drop for ContinuousResolver {
     }
 }
 
-
 // ========================
 // === Internal Helpers ===
 // ========================
 
 // internal signature of one of the lsl_push_sample_*tp functions
-type NativePushFunction<T> = unsafe extern "C" fn(lsl_outlet,
-                                                  *const T, f64, i32) -> i32;
+type NativePushFunction<T> = unsafe extern "C" fn(lsl_outlet, *const T, f64, i32) -> i32;
 
 // internal signature of one of the lsl_pull_sample_* functions
-type NativePullFunction<T> = unsafe extern "C" fn(lsl_inlet,
-                                                  *mut T, i32, f64, *mut i32) -> f64;
+type NativePullFunction<T> = unsafe extern "C" fn(lsl_inlet, *mut T, i32, f64, *mut i32) -> f64;
 
 // helper functions for interop with native data types in the lsl_sys module
 impl ChannelFormat {
@@ -2041,7 +2064,7 @@ impl ChannelFormat {
             lsl_channel_format_t_cft_int64 => ChannelFormat::Int64,
             // Note that this will convert any unknown values that come ouf of the lib
             // into Undefined
-            _ => ChannelFormat::Undefined
+            _ => ChannelFormat::Undefined,
         }
     }
 }
@@ -2083,7 +2106,7 @@ impl fmt::Display for Error {
             Error::BadArgument => "incorrectly specified argument.",
             Error::ResourceCreation => "resource creation failed.",
             Error::Internal => "internal error in native library",
-            Error::Unknown => "unknown error"
+            Error::Unknown => "unknown error",
         };
         write!(f, "{}", msg)
     }
@@ -2093,15 +2116,15 @@ impl fmt::Display for Error {
 /// Since no further source information is available, this is omitted.
 impl std::error::Error for Error {}
 
-
 // Internal function that creates a CString from a well-formed utf8-encoded &str and panics if
 // the string contains inline zero bytes. This function *panics* if a null byte is contained in s,
 // therefore this should only be used in APIs that do not return error values.
 fn make_cstring(s: &str) -> ffi::CString {
     // If you're getting this, you passed a string containing 0 bytes to the library. In the
     // context where it happened, this is a fatal error.
-    ffi::CString::new(s).expect("Embedded zero bytes are invalid in strings passed to \
-                                   liblsl.")
+    ffi::CString::new(s).expect(
+        "Embedded zero bytes are invalid in strings passed to liblsl.",
+    )
 }
 
 // Internal function that creates a String from a const char* returned by a trusted C routine.
@@ -2111,7 +2134,10 @@ fn make_cstring(s: &str) -> ffi::CString {
 unsafe fn make_string(s: *const ::std::os::raw::c_char) -> String {
     // If this happens, the native library has returned a NULL pointer in a place where it
     // should not. This indicates a fatal library bug.
-    assert!(!s.is_null(), "Attemt to create a string from a NULL pointer.");
+    assert!(
+        !s.is_null(),
+        "Attemt to create a string from a NULL pointer."
+    );
     ffi::CStr::from_ptr(s).to_string_lossy().into_owned()
 }
 
@@ -2125,7 +2151,7 @@ fn ec_to_result(ec: i32) -> Result<i32> {
             lsl_error_code_t_lsl_argument_error => Err(Error::BadArgument),
             lsl_error_code_t_lsl_lost_error => Err(Error::StreamLost),
             lsl_error_code_t_lsl_internal_error => Err(Error::Internal),
-            _ => Err(Error::Unknown)
+            _ => Err(Error::Unknown),
         }
     } else {
         Ok(ec)

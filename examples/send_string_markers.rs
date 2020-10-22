@@ -1,5 +1,4 @@
 /** Example program showing how to send string-valued event markers into LSL.*/
-
 use lsl;
 use lsl::Pushable; // trait used by the outlet object
 use rand::Rng;
@@ -25,7 +24,7 @@ fn main() -> Result<(), lsl::Error> {
         // now send it (as a 1-element vector of strings, since we have 1 channel)
         // if you need to send binary blobs you can also pass a Vec<Vev<u8>> here, but you shouldn't
         // use the "Markers" content type then (which is intended for utf8-encoded string data)
-        outlet.push_sample(&vec!(mymrk))?;
+        outlet.push_sample(&vec![mymrk])?;
         // wait for a random amount of time until we send the next marker
         std::thread::sleep(std::time::Duration::from_millis(rng.gen_range(0, 3000)));
     }
