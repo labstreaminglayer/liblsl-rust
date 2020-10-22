@@ -413,8 +413,8 @@ impl StreamInfo {
         unsafe {
             XMLElement {
                 cursor: lsl_get_desc(self.handle.handle),
-                // XMLElement wraps a pointer into the info's descriptive content; keep a shared
-                // ref of the underlying native info handle
+                // keep a shared ref of the underlying native handle since the xml element or
+                // elements obtained from it may outlive the StreamInfo object
                 doc: self.handle.clone()
             }
         }
@@ -674,7 +674,7 @@ impl StreamOutlet {
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
 
-    This can fail potentially with a (very unlikely) `Error::Internal` in case of a library
+    This can in principle fail with a (very unlikely) `Error::Internal` in case of a library
     problem.
     */
     fn safe_push_numeric<T>(
@@ -703,7 +703,7 @@ impl StreamOutlet {
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
 
-    This can fail potentially with a (very unlikely) Error::Internal in case of a library problem.
+    This can in principle fail with a (very unlikely) Error::Internal in case of a library problem.
     */
     fn safe_push_blob<T: AsRef<[u8]>>(
         &self,
@@ -1888,7 +1888,7 @@ impl XMLElement {
     }
 }
 
-impl<'a> fmt::Display for XMLElement {
+impl fmt::Display for XMLElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_valid() {
             write!(
