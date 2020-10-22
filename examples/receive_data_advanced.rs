@@ -29,7 +29,7 @@ fn main() -> Result<(), lsl::Error> {
     // (usually we'll want at least the channel labels, which are typically stored as below)
     println!("\nThe channel labels were:");
     let mut cursor = info.desc().child("channels").child("channel");
-    for _ in 0..info.channel_count() {
+    while cursor.is_valid() {
         print!("  {}", cursor.child_value_named("label"));
         cursor = cursor.next_sibling();
     }
@@ -43,7 +43,7 @@ fn main() -> Result<(), lsl::Error> {
     // let's also suppose that we want to sync the received data's time stamps with our local_clock(),
     // e.g., to relate the data to some local events. We can enable that via post-processing, but
     // see also the inlet's time_correction() method for the manual way that gives you full control
-    inl.set_postprocessing(&[lsl::ProcessingOption::ClockSync, lsl::ProcessingOption::Dejitter]);
+    inl.set_postprocessing(&[lsl::ProcessingOption::ClockSync, lsl::ProcessingOption::Dejitter])?;
 
 
     // now we're reading data in a loop and print it as we go

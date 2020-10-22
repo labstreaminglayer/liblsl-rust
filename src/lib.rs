@@ -18,8 +18,11 @@ The API covers two areas:
 - The "pull API" (aka subscribe) allows to create stream inlets and read time-synched experiment
   data from them (for recording, viewing or experiment control).
 
-This crate provides safe bindings to the [liblsl](https://github.com/sccn/liblsl) system library
-via the low-level/raw `lsl-sys` crate.
+This crate provides safe bindings to the [liblsl](https://github.com/sccn/liblsl) library via the
+low-level/raw `lsl-sys` crate.
+
+**Examples:** this library comes with example scripts for all common use cases (found in the crate's
+github repository).
 */
 
 use lsl_sys::*;
@@ -53,11 +56,22 @@ pub const FOREVER: f64 = 32000000.0;
 /// Error type for all errors that can be returned by this library.
 #[derive(Copy, Clone, Debug)]
 pub enum Error {
-    Timeout,
-    StreamLost,
-    Internal,
+    /// A bad argument was passed into a library function (e.g., negative number, string containing
+    /// embedded zero bytes (which C libraries tend to not accept).
     BadArgument,
+    /// A user-provided timeout has expired.
+    Timeout,
+    /// The stream that this is reading from has disappeared from the network and is unrecoverable.
+    /// This can only happen if the stream had an empty `source_id` or you turned off recovery.
+    StreamLost,
+    /// Resource creation failed. This is usually due to OS resource exhaustion (e.g., out of memory,
+    /// thread handles, sockets, or the like).
     ResourceCreation,
+    /// An internal error happened in the library. In some cases where no additional information is
+    /// available from the API, resource errors are also returned as Internal (where documented).
+    Internal,
+    /// An unknown error has occurred. There are only very few calls where this can happen since no
+    /// detailed error codes are available in those cases.
     Unknown
 }
 
@@ -125,8 +139,9 @@ Protocol version number.
 - The major version is protocol_version() / 100;
 - The minor version is protocol_version() % 100;
 
-Clients with different minor versions are protocol-compatible with each other
-while clients with different major versions will refuse to work together.
+Clients with different minor versions are protocol-compatible with each other while clients with
+different major versions will refuse to work together (as of this writing, all versions are
+compatible with each other).
 */
 pub fn protocol_version() -> i32 {
     unsafe {
@@ -149,8 +164,8 @@ pub fn library_version() -> i32 {
 /**
 Get a string containing library/build information.
 
-The format of the string shouldn't be used for anything important except giving a debugging person
-a good idea which exact library version is used.
+The format is considered an implementation detail and may change. This is mostly intended for
+debugging potential ABI or version issues.
 */
 pub fn library_info() -> String {
     unsafe {
@@ -162,11 +177,16 @@ pub fn library_info() -> String {
 /**
 Obtain a local system time stamp in seconds.
 
-The resolution is better than a millisecond. This reading can be used to assign time stamps to
-samples as they are being acquired. If the "age" of a sample is known at a particular time
-(e.g., from USB transmission delays), it can be used as an offset to `local_clock()` to obtain a
-better estimate of when a sample was actually captured. See `StreamOutlet::push_sample()` for a
-use case.
+This clock should be used for all time measurements that are intended to be used in relation to
+LSL time stamps, since LSL cannot time-synchronize other kinds of clocks for you. *However*, if you
+build an application in which you have your own synchronized clocks (e.g., atomic clocks), it can
+make sense to use those other clocks.
+
+The resolution of this clock is better than a millisecond. The most common use case is to use this
+reading to assign time stamps to samples as they are being acquired. Specifically, if the *age* of
+a sample is known at a particular time (e.g., from USB transmission delays), it can be used as an
+offset to `local_clock()` to obtain a better (back-dated) estimate of when a sample was actually
+captured. See `StreamOutlet::push_sample()` for a use case.
 */
 pub fn local_clock() -> f64 {
     unsafe {
@@ -198,6 +218,9 @@ The content of the `StreamInfo` encompasses all the static information that is k
 a data stream, and therefore, anything you would expect to find in a file header for a streaming
 data file should be written into the stream info (in fact, if you use a tool to record one or more
 streams into an `XDF` file, the stream info goes into the file header.
+
+**Examples:** this library comes with example scripts for all common use cases (found in the crate's
+github repository). You can find various uses of the `StreamInfo` object in most of these files.
 */
 #[derive(Debug)]
 pub struct StreamInfo {
@@ -229,6 +252,9 @@ impl StreamInfo {
        a stream with the same source id on the network again). Therefore, it is highly recommended
        to always try to provide whatever information can uniquely identify the data source itself.
        If you don't have a unique id, you may use an empty str here.
+
+    This can fail with an `Error::BadArgument` variant or in extremely rare cases with an
+    `Error::ResourceCreation` (e.g., in case of an out of memory).
     */
     pub fn new(stream_name: &str, stream_type: &str, channel_count: u32, nominal_srate: f64,
                channel_format: ChannelFormat, source_id: &str) -> Result<StreamInfo>
@@ -450,8 +476,8 @@ impl StreamInfo {
          `<v6service_port>`
        * the extended description element `<desc>` with user-defined sub-elements.
 
-    This is unlikely to fail, but could do so e.g. if running out of memory or possibly in case of
-    a library error.
+    In extremely rare cases this could fail with an `Error::Internal`, e.g., out of memory or
+    issues in the XML processing.
     */
     pub fn to_xml(&self) -> Result<String> {
         unsafe {
@@ -479,18 +505,18 @@ impl StreamInfo {
         }
     }
 
-    /// Get the native implementation handle.
-    pub fn native_handle(&self) -> lsl_streaminfo {
-        self.handle
-    }
-
     /// Construct a blank `StreamInfo`.
     pub fn from_blank() -> Result<StreamInfo> {
         StreamInfo::new("untitled", "", 0, 0.0,
                         ChannelFormat::Undefined, "")
     }
 
-    /// Create a `StreamInfo` from an XML string.
+    /**
+    Create a `StreamInfo` from an XML string.
+
+    This can fail in extremely rare cases with an `Error::ResourceCreation` variant (e.g. out of
+    mem).
+    */
     pub fn from_xml(xml: &str) -> Result<StreamInfo> {
         let xml = ffi::CString::new(xml)?;
         unsafe {
@@ -502,13 +528,21 @@ impl StreamInfo {
         }
     }
 
-    /// Create a `StreamInfo` from a native handle.
-    /// The info object takes ownership of the handle and will deallocate it on drop.
-    pub fn from_handle(handle: lsl_streaminfo) -> StreamInfo {
-        if handle.is_null() {
-            // this should only happen in case of a fatal programming error
-            panic!("Attempted to create a StreamInfo from a NULL handle.")
-        }
+
+    /// Get the native implementation handle. Internal but exposed to allow experimental uses.
+    #[doc(hidden)]
+    pub fn native_handle(&self) -> lsl_streaminfo {
+        self.handle
+    }
+
+    /*
+    Create a `StreamInfo` from a native handle.
+
+    The info object takes ownership of the handle and will deallocate it on drop. This is considered
+    internal since you can only get such a handle by calling raw native C library functions.
+    */
+    fn from_handle(handle: lsl_streaminfo) -> StreamInfo {
+        assert!(!handle.is_null(), "Attempted to create a StreamInfo from a NULL handle.");
         StreamInfo { handle }
     }
 }
@@ -525,10 +559,7 @@ impl Clone for StreamInfo {
     fn clone(&self) -> StreamInfo {
         unsafe {
             let handle = lsl_copy_streaminfo(self.handle);
-            if handle.is_null() {
-                // treat as a fatal error (out of mem or fatal bug in native library)
-                panic!("Failed to clone native lsl_streaminfo object.")
-            }
+            assert!(!handle.is_null(), "Failed to clone native lsl_streaminfo object.");
             StreamInfo { handle }
         }
     }
@@ -551,6 +582,9 @@ Outlets are used to make streaming data (and the meta-data) available on the lab
 
 The actual sample-pushing functionality is provided via the `Pushable` and `ExPushable` traits
 below.
+
+**Examples:** the `send_*.rs` examples (found in the crate's github repository) illustrate the use
+of `StreamOutlet`.
 */
 #[derive(Debug)]
 pub struct StreamOutlet {
@@ -573,6 +607,9 @@ impl StreamOutlet {
        nominal sampling rate, otherwise x100 in samples). A good default is 360, which corresponds
        to 6 minutes of data. Note that, for high-bandwidth data you should consider using a lower
        value here to avoid running out of RAM in case data have to be buffered unexpectedly.
+
+    This can fail with an `Error::BadArgument` or an `Error::ResourceCreation` variant (e.g., if
+    running out of some OS resource like memory or sockets, but that is exceedingly rare).
     */
     pub fn new(info: &StreamInfo, chunk_size: i32, max_buffered: i32) -> Result<StreamOutlet> {
         let channel_count = info.channel_count() as usize;
@@ -599,7 +636,7 @@ impl StreamOutlet {
     /**
     Check whether consumers are currently registered.
 
-    You can use this to disable sending data if there's no consumer (eg to save battery on an
+    You can use this to disable sending data if there's no consumer (e.g. to save battery on an
     embedded device) -- however, this is not necessary and most production clients do not use it.
     */
     pub fn have_consumers(&self) -> bool {
@@ -624,8 +661,12 @@ impl StreamOutlet {
 
     /**
     Retrieve the stream info provided by this outlet.
+
     This is what was used to create the stream (and also has the Additional Network Information
     fields assigned).
+
+    In extremely rare cases this may fail with an `Err::ResourceCreation` variant (e.g., due to
+    out of memory).
     */
     pub fn info(&self) -> Result<StreamInfo> {
         unsafe {
@@ -660,6 +701,9 @@ impl StreamOutlet {
     * `pushthrough`: Whether to push the sample through to the receivers instead of buffering it
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
+
+    This can fail potentially with a (very unlikely) `Error::Internal` in case of a library
+    problem.
     */
     fn safe_push_numeric<T>(&self, func: NativePushFunction<T>, data: &vec::Vec<T>, timestamp: f64,
                             pushthrough: bool) -> Result<()> {
@@ -681,6 +725,8 @@ impl StreamOutlet {
     * `pushthrough`: Whether to push the sample through to the receivers instead of buffering it
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
+
+    This can fail potentially with a (very unlikely) Error::Internal in case of a library problem.
     */
     fn safe_push_blob<T: AsRef<[u8]>>(&self, data: &vec::Vec<T>, timestamp: f64,
                                       pushthrough: bool) -> Result<()> {
@@ -708,8 +754,12 @@ StreamOutlet.
 See also the `ExPushable` trait for the extended-argument versions of these methods,
 `push_sample_ex<T>()` and `push_chunk_ex<T>()`.
 
-Note: while these methods can technically fail, this is rare and would only happen if arguments
-were malformed, or in the event of an OS error (e.g., out of memory) or a buggy native library.
+**Note:** while these methods can technically fail, this is exceedingly rare and would only happen
+if arguments were malformed, or in the event of an OS error (e.g., out of memory) or a native
+library problem. The error variants would then be `Error::BadArgument` or `Error::Internal`.
+
+If you push in data that as the wrong size (array length not matching the declared number of
+channels), these functions will trigger an assert.
 */
 pub trait Pushable<T> {
     /**
@@ -775,8 +825,12 @@ Implemented by StreamOutlet.
 
 See also the `Pushable` trait for the simpler methods `push_sample<T>()` and `push_chunk<T>()`.
 
-Note: while these methods can technically fail, this is rare and would only happen if arguments
-were malformed, in case of an OS error (e.g., out of memory) or a buggy native library.
+Note: while these methods can technically fail, this is exceedingly rare and would only happen if
+arguments were malformed, in case of an OS error (e.g., out of memory) or a native library problem.
+The error variants would then be `Error::BadArgument` or `Error::Internal`.
+
+If you push in data that as the wrong size (array length not matching the declared number of
+channels), these functions will trigger an assert.
 */
 pub trait ExPushable<T>: HasNominalRate {
 
@@ -925,6 +979,7 @@ impl Drop for StreamOutlet {
 }
 
 /// Exposes a sampling rate via the method nominal_srate().
+#[doc(hidden)]
 pub trait HasNominalRate {
     fn nominal_srate(&self) -> f64;
 }
@@ -956,7 +1011,12 @@ Arguments:
    the outlets that are present on the network may be returned.
 
 Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
-be used to open an inlet. The full info can be retrieved from the inlet if needed.
+be used to open an inlet. The full info can be retrieved from the inlet if needed. This could fail
+in very rare circumstances with an `Error::Internal` if there was some OS issue and/or library
+problem.
+
+**Examples: the `receive_*.rs` examples (found in the crate's github repository) illustrate
+the use of the resolve functions.
 */
 pub fn resolve_streams(wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
     // the fixed-size buffer is safe since the native function uses it as the max number of results
@@ -992,6 +1052,12 @@ Arguments:
 Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
 be used to open an inlet. The full info can be retrieved from the inlet if needed. In case of a
 timeout, the result is *not* an `Error::Timeout` but instead an shorter or empty result vector.
+
+This could fail in very rare circumstances with an `Error::Internal` if there was some OS issue
+and/or library problem.
+
+**Examples: the `receive_*.rs` examples (found in the crate's github repository) illustrate
+the use of the resolve functions.
 */
 pub fn resolve_byprop(prop: &str, value: &str, minimum: i32,
                       wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
@@ -1035,6 +1101,12 @@ Arguments:
 Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
 be used to open an inlet. The full info can be retrieved from the inlet if needed. In case of a
 timeout, the result is *not* an `Error:Timeout` but instead an shorter or empty result vector.
+
+This could fail in very rare circumstances with an `Error::Internal` if there was some OS issue
+and/or library problem.
+
+**Examples: the `receive_*.rs` examples (found in the crate's github repository) illustrate
+the use of the resolve functions.
 */
 pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
     // the fixed-size buffer is safe since the native function uses it as the max number of results
@@ -1063,6 +1135,9 @@ A stream inlet.
 Inlets are used to receive streaming data (and meta-data) from the lab network.
 
 The actual sample-pulling functionality is provided via the `Pullable` trait below.
+
+**Examples:** the `receive_*.rs` examples (found in the crate's github repository) illustrate the
+use of `StreamInlet`.
 */
 #[derive(Debug)]
 pub struct StreamInlet {
@@ -1095,6 +1170,9 @@ impl StreamInlet {
        have a `source_id` set). In all other cases (`recover` is `false` or the stream is not
        recoverable) inlet methods may throw a `LostError` if the stream's source is lost (e.g.,
        due to an app or computer crash).
+
+    This can fail with an `Error::BadArgument` or or in extremely rare cases (e.g., out of mem)
+    with an `Error::ResourceCreation`.
     */
     pub fn new(info: &StreamInfo, max_buflen: i32, max_chunklen: i32,
                recover: bool) -> Result<StreamInlet> {
@@ -1119,6 +1197,10 @@ impl StreamInlet {
     Arguments:
     * `timeout`: Timeout of the operation. You can use the value `lsl::FOREVER` to have no timeout.
 
+    This operation can definitely fail with an `Error::Timeout` if the data were not transmitted in
+    time (e.g., giant meta-data or, more likely, due to network/firewall misconfiguration), or an
+    `Error::StreamLost` (if the stream is since gone and was unrecoverable), and in very rare cases
+    with  `Error::Internal` or `Error::Unknown` (e.g., out of sockets or memory).
     */
     pub fn info(&self, timeout: f64) -> Result<StreamInfo> {
         let mut ec = [0 as i32];
@@ -1149,7 +1231,8 @@ impl StreamInlet {
        misconfigured firewalls or the like).
 
     Besides an `Error::Timeout`, this may also throw an `Error::StreamLost`, if the stream source
-    has been lost in the meantime (see also `recover` option in `::new()`).
+    has been lost in the meantime (see also `recover` option in `::new()`). An `Error::Internal` is
+    also possible in case of network issues.
     */
     pub fn open_stream(&self, timeout: f64) -> Result<()> {
         let mut ec = [0 as i32];
@@ -1197,8 +1280,11 @@ impl StreamInlet {
     stamp that was remotely generated via `local_clock()` to map it into the local clock domain of
     this machine.
 
-    Besides an `Error::Timeout`, this may also throw an `Error::StreamLost`, if the stream source
-    has been lost in the meantime (see also `recover` option in `::new()`).
+    This can fail with an error `Error::Timeout` on short timeouts if the network is overloaded or
+    very poor, and this may also throw an `Error::StreamLost`, if the stream source has been lost
+    in the meantime (see also `recover` option in the `new()` constructor). In extremely rare
+    cases, an `Error::Internal` is also possible (e.g. out of OS resources). If the first call has
+    succeeded, no more errors will happen.
     */
     pub fn time_correction(&self, timeout: f64) -> Result<f64> {
         let mut ec = [0 as i32];
@@ -1225,6 +1311,12 @@ impl StreamInlet {
        upper bound on the uncertainty of the time offset. Empirically, 0.2 ms a typical RTT for
        wired networks, 2 ms is typical of wireless networks, but it can be much higher on poor
        networks.
+
+    This can fail with an error `Error::Timeout` on short timeouts if the network is overloaded or
+    very poor, and this may also throw an `Error::StreamLost`, if the stream source has been lost
+    in the meantime (see also `recover` option in the `new()` constructor). In extremely rare
+    cases, an `Error::Internal` is also possible (e.g. out of OS resources). If the first call has
+    succeeded, no more errors will happen.
     */
     pub fn time_correction_ex(&self, timeout: f64) -> Result<(f64, f64, f64)> {
         let mut ec = [0 as i32];
@@ -1256,19 +1348,18 @@ impl StreamInlet {
     * `options`: an array of `ProcessingOption` values that shall be set. You can also pass in
        the value `[ProcessingOption::ALL]` to enable all options or an empty array to clear all
        previously set options.
+
+    This will return an `Error::BadArgument` if an invalid option is passed in.
     */
-    pub fn set_postprocessing(&self, options: &[ProcessingOption]) {
+    pub fn set_postprocessing(&self, options: &[ProcessingOption]) -> Result<()> {
         let mut flags: u32 = 0;
         for &opt in options {
             flags |= opt as u32;
         }
         unsafe {
             let ec = lsl_set_postprocessing(self.handle, flags as u32);
-            if let Err(kind) = ec_to_result(ec) {
-                // this should only happen in response to an unsupported flag being passed in,
-                // which would indicate a lib version incompatibility (i.e., fatal)
-                panic!("{}", kind);
-            }
+            ec_to_result(ec)?;
+            Ok(())
         }
     }
 
@@ -1323,6 +1414,8 @@ impl StreamInlet {
     Arguments:
     * `func`: the native FFI function to call to pull a sample
     * `timeout`: the timeout to pass in
+
+    This can return an Error::StreamLost and potentially an Error::Internal.
     */
     fn safe_pull_numeric<T: Clone + From<i8>>(&self, func: NativePullFunction<T>,
                                               timeout: f64) -> Result<(vec::Vec<T>, f64)> {
@@ -1350,6 +1443,8 @@ impl StreamInlet {
     Arguments:
     * `mapper`: a function that converts a `&[u8]` to an owned copy of type `T`.
     * `timeout`: the timeout to pass to the native function
+
+    This can return an Error::StreamLost and potentially an Error::Internal.
     */
     fn safe_pull_blob<T: Clone>(&self, mapper: fn(&[u8]) -> T,
                                 timeout: f64) -> Result<(vec::Vec<T>, f64)> {
@@ -1509,21 +1604,24 @@ impl Pullable<vec::Vec<u8>> for StreamInlet {
 /**
 A lightweight XML element tree; models the `.desc()` field of `StreamInfo`.
 
-An element has a name and can have multiple named children or have text content as value;
-attributes are omitted. Most operations return a node, which allows you to chain multiple operations.
+This class can be tought of as a "cursor" in an XML document owned by the `StreamInfo`, which
+provides operations for navigating to parent, children and sibling elements, as well as modification
+operations for inserting (or removing) content. Each element has a name and can have multiple named
+children or have text content as value; attributes are omitted. Most operations return a node,
+which allows you to chain multiple operations. The API is modeled after a subset of pugixml's node
+type and is compatible with it. See also [here](https://pugixml.org/docs/manual.html#access) for
+additional documentation.
 
+*Note:* operations on non-existent nodes become safe no-ops instead of returning error variants
+or crashing. Since in most cases you will be writing data instead of navigating the tree and/or
+reading, you will rarely encounter this. You can rely on the `is_valid()` method to check the
+validity of the current element.
 
-*Note:* In line with the behavior of the underlying native API, operations on non-existent nodes
-become safe no-ops instead of returning error variants or crashing. Since in most cases you will be
-writing data instead of navigating the tree and/or reading, this should be a rare occurrence in
-practice, but if needed, you can use the `is_valid()` operation to check the validity of the
-current element.
+*Warning:* any strings passed into this function must be valid UTF8-encoded strings and contain no
+intermittent zero bytes (otherwise this will assert).
 
-*Tip:* The API  is modeled after a subset of pugixml's node type and is compatible with it. See
-also https://pugixml.org/docs/manual.html#access for additional documentation.
-
-Note: any strings passed into this function must be valid UTF8-encoded strings and contain no
-intermittent zero bytes.
+**Examples:** the `*advanced.rs` examples (found in the crate's github repository) illustrate the
+use of `XMLElement` cursors.
 */
 #[derive(Copy, Clone, Debug)]
 pub struct XMLElement {
@@ -1768,6 +1866,9 @@ A convenience class that resolves streams continuously in the background.
 
 This object can be queried at any time for the set of streams that are currently visible on the
 network.
+
+**Examples:** the `resolving_continuously.rs` example (found in the crate's github repository)
+illustrates the use of the `ContinuousResolver`.
 */
 #[derive(Debug)]
 pub struct ContinuousResolver {
@@ -1786,9 +1887,8 @@ impl ContinuousResolver {
        resolver. A good value here is 5.0 to report any stream that had been visible in the last
        5 seconds.
 
-    This can return an `Error::BadArgument` or an `Error::ResourceCreation` in case resource
-    creation fails, which would be most likely due to resource exhaustion at the OS level (e.g.,
-    out of memory or possibly out of socket handles / ports).
+    This can return an `Error::BadArgument` or in extremely rare cases an `Error::ResourceCreation`,
+    e.g., if your OS is out of memory or handles.
     */
     pub fn new(forget_after: f64) -> Result<ContinuousResolver> {
         if forget_after <= 0.0 {
@@ -1816,9 +1916,8 @@ impl ContinuousResolver {
     * `forget_after`: When a stream is no longer visible on the network (e.g., because it was shut
        down), this is the time in seconds after which it is no longer reported by the resolver.
 
-    This can return an `Error::BadArgument` or an `Error::ResourceCreation` in case resource
-    creation fails, which would be most likely due to resource exhaustion at the OS level (e.g.,
-    out of memory or possibly out of socket handles / ports).
+    This can return an `Error::BadArgument` or in extremely rare cases an `Error::ResourceCreation`,
+    e.g., if your OS is out of memory or handles.
     */
     pub fn new_with_prop(prop: &str, value: &str, forget_after: f64) -> Result<ContinuousResolver> {
         if forget_after <= 0.0 {
@@ -1849,9 +1948,8 @@ impl ContinuousResolver {
     * `forget_after`: When a stream is no longer visible on the network (e.g., because it was shut
        down), this is the time in seconds after which it is no longer reported by the resolver.
 
-    This can return an `Error::BadArgument` or an `Error::ResourceCreation` in case resource
-    creation fails, which would be most likely due to resource exhaustion at the OS level (e.g.,
-    out of memory or possibly out of socket handles / ports).
+    This can return an `Error::BadArgument` or in extremely rare cases an `Error::ResourceCreation`,
+    e.g., if your OS is out of memory or handles.
     */
     pub fn new_with_pred(pred: &str, forget_after: f64) -> Result<ContinuousResolver> {
         if forget_after <= 0.0 {
@@ -1873,6 +1971,9 @@ impl ContinuousResolver {
 
     Returns a vector of matching stream info objects (excluding their meta-data), any of which can
     subsequently be used to open an inlet.
+
+    In extremely rare cases this may return an `Error::Internal` if there is an OS or library
+    problem.
     */
     pub fn results(&self) -> Result<vec::Vec<StreamInfo>> {
         // the fixed-size buffer is safe since the native function uses it as the max number of
