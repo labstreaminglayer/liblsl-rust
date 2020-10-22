@@ -8,7 +8,7 @@ to allow streams to be discoverable on the network.
 
 The typical use case is in lab spaces to make, e.g., instrument data from a variety of devices
 aaccessible in real time to client programs (e.g., experimentation scripts, recording programs,
-stream viewers, or live processing software). Since LSL provides a simple uniform API, a few-line
+stream viewers, or live processing software). Since LSL provides a simple uniform API, one few-line
 client can receive data from devices across many device types and suppliers/vendors (such as EEG,
 eye tracking, audio, human input devices, events, etc).
 
@@ -23,6 +23,12 @@ low-level/raw `lsl-sys` crate.
 
 **Examples:** this library comes with example scripts for all common use cases (found in the crate's
 github repository).
+
+# Errors
+
+Operations that allocate OS resources (e.g., memory, sockets, etc) such as the `new()` functions of
+the main objects (`StreamInfo`, `StreamOutlet`, `StreamInlet`, `ContinuousResolver`) may return
+`Error::ResourceCreation` variants.
 */
 
 use lsl_sys::*;
@@ -53,7 +59,7 @@ operating systems (e.g., 32-bit UNIX).
 pub const FOREVER: f64 = 32000000.0;
 
 /// Error type for all errors that can be returned by this library.
-#[derive(Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum Error {
     /// A bad argument was passed into a library function (e.g., negative number, string containing
     /// embedded zero bytes (which C libraries tend to not accept).
@@ -61,16 +67,16 @@ pub enum Error {
     /// A user-provided timeout has expired.
     Timeout,
     /// The stream that this is reading from has disappeared from the network and is unrecoverable.
-    /// This can only happen if the stream had an empty `source_id` or you turned off recovery.
+    /// This can only happen if the stream had an empty `source_id` or if you turned off recovery.
     StreamLost,
-    /// Resource creation failed. This is usually due to OS resource exhaustion (e.g., out of memory,
-    /// thread handles, sockets, or the like).
+    /// Resource creation failed. This is usually due to OS resource exhaustion (e.g., out of
+    /// memory, thread handles, sockets, or the like).
     ResourceCreation,
-    /// An internal error happened in the library. In some cases where no additional information is
-    /// available from the API, resource errors are also returned as Internal (where documented).
+    /// An internal error happened in the library. This is generally unlikely but can be returned
+    /// by a variety of library calls.
     Internal,
-    /// An unknown error has occurred. There are only very few calls where this can happen since no
-    /// detailed error codes are available in those cases.
+    /// An unknown error has happened. There are only very few calls where this can happen since no
+    /// detailed error codes are available in those cases, and is very unlikely to occur.
     Unknown,
 }
 
@@ -78,7 +84,7 @@ pub enum Error {
 type Result<T> = std::result::Result<T, Error>;
 
 /// Data format of a channel (each transmitted sample holds an array of channels).
-#[derive(Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum ChannelFormat {
     /// For up to 24-bit precision measurements in the appropriate physical unit
     /// (e.g., microvolts). Integers from -16777216 to 16777216 are represented accurately.
@@ -108,7 +114,7 @@ pub enum ChannelFormat {
 }
 
 /// Post-processing options for stream inlets.
-#[derive(Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum ProcessingOption {
     /// No automatic post-processing; return the ground-truth time stamps for manual post-
     /// processing (this is the default behavior of the inlet).
@@ -239,9 +245,6 @@ impl StreamInfo {
        a stream with the same source id on the network again). Therefore, it is highly recommended
        to always try to provide whatever information can uniquely identify the data source itself.
        If you don't have a unique id, you may use an empty str here.
-
-    This can fail with an `Error::BadArgument` variant or in extremely rare cases with an
-    `Error::ResourceCreation` (e.g., in case of an out of memory).
     */
     pub fn new(
         stream_name: &str,
@@ -448,8 +451,6 @@ impl StreamInfo {
          `<v6service_port>`
        * the extended description element `<desc>` with user-defined sub-elements.
 
-    In extremely rare cases this could fail with an `Error::Internal`, e.g., out of memory or
-    issues in the XML processing.
     */
     pub fn to_xml(&self) -> Result<String> {
         unsafe {
@@ -480,9 +481,6 @@ impl StreamInfo {
 
     /**
     Create a `StreamInfo` from an XML string.
-
-    This can fail in extremely rare cases with an `Error::ResourceCreation` variant (e.g. out of
-    mem).
     */
     pub fn from_xml(xml: &str) -> Result<StreamInfo> {
         let xml = ffi::CString::new(xml)?;
@@ -578,9 +576,6 @@ impl StreamOutlet {
        nominal sampling rate, otherwise x100 in samples). A good default is 360, which corresponds
        to 6 minutes of data. Note that, for high-bandwidth data you should consider using a lower
        value here to avoid running out of RAM in case data have to be buffered unexpectedly.
-
-    This can fail with an `Error::BadArgument` or an `Error::ResourceCreation` variant (e.g., if
-    running out of some OS resource like memory or sockets, but that is exceedingly rare).
     */
     pub fn new(info: &StreamInfo, chunk_size: i32, max_buffered: i32) -> Result<StreamOutlet> {
         let channel_count = info.channel_count() as usize;
@@ -673,9 +668,6 @@ impl StreamOutlet {
     * `pushthrough`: Whether to push the sample through to the receivers instead of buffering it
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
-
-    This can in principle fail with a (very unlikely) `Error::Internal` in case of a library
-    problem.
     */
     fn safe_push_numeric<T>(
         &self,
@@ -686,7 +678,7 @@ impl StreamOutlet {
     ) -> Result<()> {
         self.assert_len(data.len());
         unsafe {
-            ec_to_result(func(self.handle, data.as_ptr(), timestamp, pushthrough as i32))?;
+            errcode_to_result(func(self.handle, data.as_ptr(), timestamp, pushthrough as i32))?;
         }
         Ok(())
     }
@@ -702,8 +694,6 @@ impl StreamOutlet {
     * `pushthrough`: Whether to push the sample through to the receivers instead of buffering it
        with subsequent samples. Typically this would be `true`. Note that the `chunk_size`, if
        specified at outlet construction, takes precedence over the pushthrough flag.
-
-    This can in principle fail with a (very unlikely) Error::Internal in case of a library problem.
     */
     fn safe_push_blob<T: AsRef<[u8]>>(
         &self,
@@ -718,7 +708,7 @@ impl StreamOutlet {
             .map(|x| u32::try_from(x.as_ref().len()).unwrap())
             .collect();
         unsafe {
-            ec_to_result(lsl_push_sample_buftp(
+            errcode_to_result(lsl_push_sample_buftp(
                 self.handle,
                 ptrs.as_ptr() as *mut *const std::os::raw::c_char,
                 lens.as_ptr(),
@@ -737,12 +727,8 @@ StreamOutlet.
 See also the `ExPushable` trait for the extended-argument versions of these methods,
 `push_sample_ex<T>()` and `push_chunk_ex<T>()`.
 
-**Note:** while these methods can technically fail, this is exceedingly rare and would only happen
-if arguments were malformed, or in the event of an OS error (e.g., out of memory) or a native
-library problem. The error variants would then be `Error::BadArgument` or `Error::Internal`.
-
-If you push in data that as the wrong size (array length not matching the declared number of
-channels), these functions will trigger an assert.
+**Note:** If you push in data that as the wrong size (array length not matching the declared number
+of channels), these functions will trigger an assertion and panic.
 */
 pub trait Pushable<T> {
     /**
@@ -810,8 +796,8 @@ Note: while these methods can technically fail, this is exceedingly rare and wou
 arguments were malformed, in case of an OS error (e.g., out of memory) or a native library problem.
 The error variants would then be `Error::BadArgument` or `Error::Internal`.
 
-If you push in data that as the wrong size (array length not matching the declared number of
-channels), these functions will trigger an assert.
+**Note:** If you push in data that as the wrong size (array length not matching the declared number
+of channels), these functions will trigger an assertion and panic.
 */
 pub trait ExPushable<T>: HasNominalRate {
     /**
@@ -1000,9 +986,7 @@ Arguments:
    the outlets that are present on the network may be returned.
 
 Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of which can subsequently
-be used to open an inlet. The full info can be retrieved from the inlet if needed. This could fail
-in very rare circumstances with an `Error::Internal` if there was some OS issue and/or library
-problem.
+be used to open an inlet. The full info can be retrieved from the inlet if needed.
 
 **Examples: the `receive_*.rs` examples (found in the crate's github repository) illustrate
 the use of the resolve functions.
@@ -1011,7 +995,7 @@ pub fn resolve_streams(wait_time: f64) -> Result<vec::Vec<StreamInfo>> {
     // the fixed-size buffer is safe since the native function uses it as the max number of results
     let mut buffer = [0 as lsl_streaminfo; 1024];
     unsafe {
-        let num_resolved = ec_to_result(lsl_resolve_all(
+        let num_resolved = errcode_to_result(lsl_resolve_all(
             buffer.as_mut_ptr(),
             buffer.len() as u32,
             wait_time,
@@ -1045,9 +1029,6 @@ Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of whi
 be used to open an inlet. The full info can be retrieved from the inlet if needed. In case of a
 timeout, the result is *not* an `Error::Timeout` but instead an shorter or empty result vector.
 
-This could fail in very rare circumstances with an `Error::Internal` if there was some OS issue
-and/or library problem.
-
 **Examples: the `receive_*.rs` examples (found in the crate's github repository) illustrate
 the use of the resolve functions.
 */
@@ -1062,7 +1043,7 @@ pub fn resolve_byprop(
     let prop = ffi::CString::new(prop)?;
     let value = ffi::CString::new(value)?;
     unsafe {
-        let num_resolved = ec_to_result(lsl_resolve_byprop(
+        let num_resolved = errcode_to_result(lsl_resolve_byprop(
             buffer.as_mut_ptr(),
             buffer.len() as u32,
             prop.as_ptr(),
@@ -1100,9 +1081,6 @@ Returns a `Vec` of `StreamInfo` objects (excluding their desc field), any of whi
 be used to open an inlet. The full info can be retrieved from the inlet if needed. In case of a
 timeout, the result is *not* an `Error:Timeout` but instead an shorter or empty result vector.
 
-This could fail in very rare circumstances with an `Error::Internal` if there was some OS issue
-and/or library problem.
-
 **Examples: the `receive_*.rs` examples (found in the crate's github repository) illustrate
 the use of the resolve functions.
 */
@@ -1111,7 +1089,7 @@ pub fn resolve_bypred(pred: &str, minimum: i32, wait_time: f64) -> Result<vec::V
     let mut buffer = [0 as lsl_streaminfo; 1024];
     let pred = ffi::CString::new(pred)?;
     unsafe {
-        let num_resolved = ec_to_result(lsl_resolve_bypred(
+        let num_resolved = errcode_to_result(lsl_resolve_bypred(
             buffer.as_mut_ptr(),
             buffer.len() as u32,
             pred.as_ptr(),
@@ -1138,6 +1116,13 @@ The actual sample-pulling functionality is provided via the `Pullable` trait bel
 
 **Examples:** the `receive_*.rs` examples (found in the crate's github repository) illustrate the
 use of `StreamInlet`.
+
+### Errors
+
+For operations where a timeout is provided, if the operation does not complete in time,
+an `Error::Timeout` will be returned -- except for the `pull_*()` functions, where this is not
+considered an error. Also, for most operations, an `Error::StreamLost` is returned if the stream
+source has been lost in the meantime (see also `recover` option in the inlet's `new()` constructor).
 */
 #[derive(Debug)]
 pub struct StreamInlet {
@@ -1170,9 +1155,6 @@ impl StreamInlet {
        have a `source_id` set). In all other cases (`recover` is `false` or the stream is not
        recoverable) inlet methods may throw a `LostError` if the stream's source is lost (e.g.,
        due to an app or computer crash).
-
-    This can fail with an `Error::BadArgument` or or in extremely rare cases (e.g., out of mem)
-    with an `Error::ResourceCreation`.
     */
     pub fn new(
         info: &StreamInfo,
@@ -1207,17 +1189,12 @@ impl StreamInlet {
 
     Arguments:
     * `timeout`: Timeout of the operation. You can use the value `lsl::FOREVER` to have no timeout.
-
-    This operation can definitely fail with an `Error::Timeout` if the data were not transmitted in
-    time (e.g., giant meta-data or, more likely, due to network/firewall misconfiguration), or an
-    `Error::StreamLost` (if the stream is since gone and was unrecoverable), and in very rare cases
-    with  `Error::Internal` or `Error::Unknown` (e.g., out of sockets or memory).
     */
     pub fn info(&self, timeout: f64) -> Result<StreamInfo> {
         let mut ec = [0 as i32];
         unsafe {
             let handle = lsl_get_fullinfo(self.handle, timeout, ec.as_mut_ptr());
-            ec_to_result(ec[0])?;
+            errcode_to_result(ec[0])?;
             match handle.is_null() {
                 false => Ok(StreamInfo::from_handle(handle)),
                 true => Err(Error::Unknown),
@@ -1239,16 +1216,12 @@ impl StreamInlet {
     * `timeout` Optional timeout of the operation. To have no timeout, you can use `lsl::FOREVER`
        here. A timeout can make sense if you want to catch connection errors (e.g., due to
        misconfigured firewalls or the like).
-
-    Besides an `Error::Timeout`, this may also throw an `Error::StreamLost`, if the stream source
-    has been lost in the meantime (see also `recover` option in `::new()`). An `Error::Internal` is
-    also possible in case of network issues.
     */
     pub fn open_stream(&self, timeout: f64) -> Result<()> {
         let mut ec = [0 as i32];
         unsafe {
             lsl_open_stream(self.handle, timeout, ec.as_mut_ptr());
-            ec_to_result(ec[0])?;
+            errcode_to_result(ec[0])?;
         }
         Ok(())
     }
@@ -1285,22 +1258,12 @@ impl StreamInlet {
        `lsl::FOREVER` to have no timeout. Otherwise, 2.0-5.0 seconds would be a reasonable timeout.
        Note that even if the timeout fails, the library will continue to attempt retrieving a
        time-correction estimate in the background, which can be queried in a subsequent call.
-
-    Returns the time correction estimate. This is the number that needs to be added to a time
-    stamp that was remotely generated via `local_clock()` to map it into the local clock domain of
-    this machine.
-
-    This can fail with an error `Error::Timeout` on short timeouts if the network is overloaded or
-    very poor, and this may also throw an `Error::StreamLost`, if the stream source has been lost
-    in the meantime (see also `recover` option in the `new()` constructor). In extremely rare
-    cases, an `Error::Internal` is also possible (e.g. out of OS resources). If the first call has
-    succeeded, no more errors will happen.
     */
     pub fn time_correction(&self, timeout: f64) -> Result<f64> {
         let mut ec = [0 as i32];
         unsafe {
             let result = lsl_time_correction(self.handle, timeout, ec.as_mut_ptr());
-            ec_to_result(ec[0])?;
+            errcode_to_result(ec[0])?;
             Ok(result)
         }
     }
@@ -1321,12 +1284,6 @@ impl StreamInlet {
        upper bound on the uncertainty of the time offset. Empirically, 0.2 ms a typical RTT for
        wired networks, 2 ms is typical of wireless networks, but it can be much higher on poor
        networks.
-
-    This can fail with an error `Error::Timeout` on short timeouts if the network is overloaded or
-    very poor, and this may also throw an `Error::StreamLost`, if the stream source has been lost
-    in the meantime (see also `recover` option in the `new()` constructor). In extremely rare
-    cases, an `Error::Internal` is also possible (e.g. out of OS resources). If the first call has
-    succeeded, no more errors will happen.
     */
     pub fn time_correction_ex(&self, timeout: f64) -> Result<(f64, f64, f64)> {
         let mut ec = [0 as i32];
@@ -1339,7 +1296,7 @@ impl StreamInlet {
                 timeout,
                 ec.as_mut_ptr(),
             );
-            ec_to_result(ec[0])?;
+            errcode_to_result(ec[0])?;
             Ok((result, retvals[0], retvals[1]))
         }
     }
@@ -1359,8 +1316,6 @@ impl StreamInlet {
     * `options`: an array of `ProcessingOption` values that shall be set. You can also pass in
        the value `[ProcessingOption::ALL]` to enable all options or an empty array to clear all
        previously set options.
-
-    This will return an `Error::BadArgument` if an invalid option is passed in.
     */
     pub fn set_postprocessing(&self, options: &[ProcessingOption]) -> Result<()> {
         let mut flags: u32 = 0;
@@ -1369,7 +1324,7 @@ impl StreamInlet {
         }
         unsafe {
             let ec = lsl_set_postprocessing(self.handle, flags as u32);
-            ec_to_result(ec)?;
+            errcode_to_result(ec)?;
             Ok(())
         }
     }
@@ -1424,7 +1379,7 @@ impl StreamInlet {
     * `timeout`: the timeout to pass in
 
     Returns the time stamp of the sample or 0.0 if no new data was available within the given
-    timeout. Can also return an `Error::StreamLost` and potentially an `Error::Internal`.
+    timeout.
     */
     fn safe_pull_numeric_buf<T: Clone + From<i8>>(
         &self,
@@ -1444,7 +1399,7 @@ impl StreamInlet {
                 timeout,
                 ec.as_mut_ptr(),
             );
-            ec_to_result(ec[0])?;
+            errcode_to_result(ec[0])?;
             Ok(ts)
         }
     }
@@ -1456,8 +1411,6 @@ impl StreamInlet {
     Arguments:
     * `func`: the native FFI function to call to pull a sample
     * `timeout`: the timeout to pass in
-
-    This can return an `Error::StreamLost` and potentially an `Error::Internal`.
     */
     fn safe_pull_numeric<T: Clone + From<i8>>(
         &self,
@@ -1482,7 +1435,7 @@ impl StreamInlet {
     * `timeout`: the timeout to pass to the native function
 
     Returns the time stamp of the sample or 0.0 if no new data was available within the given
-    timeout. Can also return an `Error::StreamLost` and potentially an `Error::Internal`.
+    timeout.
     */
     fn safe_pull_blob_buf<T: Clone>(
         &self,
@@ -1502,7 +1455,7 @@ impl StreamInlet {
                 timeout,
                 ec.as_mut_ptr(),
             );
-            ec_to_result(ec[0])?;
+            errcode_to_result(ec[0])?;
             if buf.len() != self.channel_count {
                 buf.resize(self.channel_count, mapper(&[0 as u8; 0]));
             }
@@ -1524,8 +1477,6 @@ impl StreamInlet {
     Arguments:
     * `mapper`: a function that converts a `&[u8]` to an owned copy of type `T`.
     * `timeout`: the timeout to pass to the native function
-
-    This can return an `Error::StreamLost` and potentially an `Error::Internal`.
     */
     fn safe_pull_blob<T: Clone>(
         &self,
@@ -1546,7 +1497,7 @@ impl StreamInlet {
                 timeout,
                 ec.as_mut_ptr(),
             );
-            ec_to_result(ec[0])?;
+            errcode_to_result(ec[0])?;
             let mut sample = vec::Vec::<T>::new();
             if ts != 0.0 {
                 for k in 0..ptrs.len() {
@@ -1590,13 +1541,9 @@ pub trait Pullable<T> {
     was available, the sample vector will be empty and the timestamp will be 0.0 i.e., it will
     *not* return an `Error::Timeout` since we consider this a normal behavior.
 
-
     If you want to remap the time stamp to the local machine's clock, you can enable the clock
     synchronization option on the inlet using the `set_postprocessing()` method. Alternatively that
     can also be done manually by adding the return values of inlet's `time_correction()` method.
-
-    This can return an `Error::StreamLost` if the stream source has been lost (see also `recover`
-    option in inlet constructor for details).
     */
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<T>, f64)>;
 
@@ -1621,9 +1568,6 @@ pub trait Pullable<T> {
     If you want to remap the time stamp to the local machine's clock, you can enable the clock
     synchronization option on the inlet using the `set_postprocessing()` method. Alternatively that
     can also be done manually by adding the return values of inlet's `time_correction()` method.
-
-    This can return an `Error::StreamLost` if the stream source has been lost (see also `recover`
-    option in inlet constructor for details).
     */
     fn pull_sample_buf(&self, buf: &mut vec::Vec<T>, timeout: f64) -> Result<f64>;
 
@@ -1637,9 +1581,6 @@ pub trait Pullable<T> {
     inlet -- if you allow data to accomulate beyond this amount, the oldest data samples will be
     discarded (for real-time processing applications it can make sense to set a low limit to avoid
     wasting resources, while for recording applications, a high limit is recommended).
-
-    This can return an `Error::StreamLost` if the stream source has been lost (see also `recover`
-    option in inlet constructor for details).
     */
     fn pull_chunk(&self) -> Result<(vec::Vec<vec::Vec<T>>, vec::Vec<f64>)> {
         let mut samples: vec::Vec<vec::Vec<T>> = vec![];
@@ -1753,16 +1694,16 @@ which allows you to chain multiple operations. The API is modeled after a subset
 type and is compatible with it. See also [here](https://pugixml.org/docs/manual.html#access) for
 additional documentation.
 
-*Note:* operations on non-existent nodes become safe no-ops instead of returning error variants
+**Note:** operations on non-existent nodes become safe no-ops instead of returning error variants
 or crashing. Since in most cases you will be writing data instead of navigating the tree and/or
 reading, you will rarely encounter this. You can rely on the `is_valid()` method to check the
 validity of the current element.
 
-*Warning:* any strings passed into this function must be valid UTF8-encoded strings and contain no
-intermittent zero bytes (otherwise this will assert).
-
 **Examples:** the `*advanced.rs` examples (found in the crate's github repository) illustrate the
 use of `XMLElement` cursors.
+
+**Panics:** any strings passed into this function must be valid UTF8-encoded strings and contain no
+intermittent zero bytes (otherwise this will trigger an assertion and panic).
 */
 #[derive(Clone, Debug)]
 pub struct XMLElement {
@@ -2064,9 +2005,6 @@ impl ContinuousResolver {
        shut down), this is the time in seconds after which it is no longer reported by the
        resolver. A good value here is 5.0 to report any stream that had been visible in the last
        5 seconds.
-
-    This can return an `Error::BadArgument` or in extremely rare cases an `Error::ResourceCreation`,
-    e.g., if your OS is out of memory or handles.
     */
     pub fn new(forget_after: f64) -> Result<ContinuousResolver> {
         if forget_after <= 0.0 {
@@ -2093,9 +2031,6 @@ impl ContinuousResolver {
     * `value`: The string value that the property should have (e.g., "EEG" as the type property).
     * `forget_after`: When a stream is no longer visible on the network (e.g., because it was shut
        down), this is the time in seconds after which it is no longer reported by the resolver.
-
-    This can return an `Error::BadArgument` or in extremely rare cases an `Error::ResourceCreation`,
-    e.g., if your OS is out of memory or handles.
     */
     pub fn new_with_prop(prop: &str, value: &str, forget_after: f64) -> Result<ContinuousResolver> {
         if forget_after <= 0.0 {
@@ -2125,9 +2060,6 @@ impl ContinuousResolver {
     * `value`: The string value that the property should have (e.g., "EEG" as the type property).
     * `forget_after`: When a stream is no longer visible on the network (e.g., because it was shut
        down), this is the time in seconds after which it is no longer reported by the resolver.
-
-    This can return an `Error::BadArgument` or in extremely rare cases an `Error::ResourceCreation`,
-    e.g., if your OS is out of memory or handles.
     */
     pub fn new_with_pred(pred: &str, forget_after: f64) -> Result<ContinuousResolver> {
         if forget_after <= 0.0 {
@@ -2148,16 +2080,13 @@ impl ContinuousResolver {
 
     Returns a vector of matching stream info objects (excluding their meta-data), any of which can
     subsequently be used to open an inlet.
-
-    In extremely rare cases this may return an `Error::Internal` if there is an OS or library
-    problem.
     */
     pub fn results(&self) -> Result<vec::Vec<StreamInfo>> {
         // the fixed-size buffer is safe since the native function uses it as the max number of
         // results
         let mut buffer = [0 as lsl_streaminfo; 1024];
         unsafe {
-            let num_resolved = ec_to_result(lsl_resolver_results(
+            let num_resolved = errcode_to_result(lsl_resolver_results(
                 self.handle,
                 buffer.as_mut_ptr(),
                 buffer.len() as u32,
@@ -2309,7 +2238,7 @@ unsafe fn make_string(s: *const ::std::os::raw::c_char) -> String {
 
 // check whether a given value that may be an error code signals an error,
 // and convert to the correct Err() type or Ok(value) otherwise
-fn ec_to_result(ec: i32) -> Result<i32> {
+fn errcode_to_result(ec: i32) -> Result<i32> {
     if ec < 0 {
         #[allow(non_upper_case_globals)]
         match ec {
