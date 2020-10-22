@@ -48,10 +48,19 @@ fn main() -> Result<(), lsl::Error> {
 
     // now we're reading data in a loop and print it as we go
     println!("Reading data...");
+    let mut sample = vec::Vec::<f32>::new();
     loop {
-        // do a blocking read to get the next successive sample and its time stamp (we need a type
-        // hint since pull_sample() is defined for various data types)
-        let (sample, ts): (Vec<f32>, _) = inl.pull_sample(lsl::FOREVER)?;
-        println!("got {:?} at time {}", sample, ts);
+        // do a blocking read (with finite timeout) to get the next successive sample and its
+        // time stamp; we read into a pre-allocated buffer (which will be right-sized by the pull
+        // call) since that's more efficient for high-bandwidth data.
+        let ts = inl.pull_sample_buf(&mut sample, 5.0)?;
+
+        // if we're using a finite timeout we need to check if the timestamp is nonzero (zero means
+        // no new data)
+        if ts != 0.0 {
+            println!("got {:?} at time {}", sample, ts);
+        } else {
+            println!("got no new data, waiting some more...")
+        }
     }
 }

@@ -1415,6 +1415,41 @@ impl StreamInlet {
     // --- internal methods ---
 
     /*
+    Internal helper to implement `pull_sample_buf()` safely for numeric value types, given a native
+    function to do the actual job.
+
+    Arguments:
+    * `func`: the native FFI function to call to pull a sample
+    * `buf`: a buffer to read into; will be resized if necessary
+    * `timeout`: the timeout to pass in
+
+    Returns the time stamp of the sample or 0.0 if no new data was available within the given
+    timeout. Can also return an `Error::StreamLost` and potentially an `Error::Internal`.
+    */
+    fn safe_pull_numeric_buf<T: Clone + From<i8>>(
+        &self,
+        func: NativePullFunction<T>,
+        buf: &mut vec::Vec<T>,
+        timeout: f64,
+    ) -> Result<f64> {
+        let mut ec = [0 as i32];
+        if buf.len() != self.channel_count {
+            buf.resize(self.channel_count, T::from(0));
+        }
+        unsafe {
+            let ts = func(
+                self.handle,
+                buf.as_mut_ptr(),
+                buf.len() as i32,
+                timeout,
+                ec.as_mut_ptr(),
+            );
+            ec_to_result(ec[0])?;
+            Ok(ts)
+        }
+    }
+
+    /*
     Internal helper to implement `pull_sample()` safely for numeric value types, given a native
     function to do the actual job.
 
@@ -1422,28 +1457,63 @@ impl StreamInlet {
     * `func`: the native FFI function to call to pull a sample
     * `timeout`: the timeout to pass in
 
-    This can return an Error::StreamLost and potentially an Error::Internal.
+    This can return an `Error::StreamLost` and potentially an `Error::Internal`.
     */
     fn safe_pull_numeric<T: Clone + From<i8>>(
         &self,
         func: NativePullFunction<T>,
         timeout: f64,
     ) -> Result<(vec::Vec<T>, f64)> {
-        let mut ec = [0 as i32];
         let mut result = vec![T::from(0); self.channel_count];
+        let ts = self.safe_pull_numeric_buf(func, &mut result, timeout)?;
+        if ts == 0.0 {
+            result.clear();
+        }
+        Ok((result, ts))
+    }
+
+    /*
+    Internal helper to implement `pull_sample_buf()` for types that can be be created from a
+    `&[u8]` slice of bytes.
+
+    Arguments:
+    * `mapper`: a function that converts a `&[u8]` to an owned copy of type `T`.
+    * `buf`: a buffer to read into; will be resized if necessary
+    * `timeout`: the timeout to pass to the native function
+
+    Returns the time stamp of the sample or 0.0 if no new data was available within the given
+    timeout. Can also return an `Error::StreamLost` and potentially an `Error::Internal`.
+    */
+    fn safe_pull_blob_buf<T: Clone>(
+        &self,
+        mapper: fn(&[u8]) -> T,
+        buf: &mut vec::Vec<T>,
+        timeout: f64,
+    ) -> Result<f64> {
+        let mut ec = [0 as i32];
+        let mut ptrs = vec![0 as *mut ::std::os::raw::c_char; self.channel_count];
+        let mut lens = vec![0 as u32; self.channel_count];
         unsafe {
-            let ts = func(
+            let ts = lsl_pull_sample_buf(
                 self.handle,
-                result.as_mut_ptr(),
-                result.len() as i32,
+                ptrs.as_mut_ptr(),
+                lens.as_mut_ptr(),
+                ptrs.len() as i32,
                 timeout,
                 ec.as_mut_ptr(),
             );
             ec_to_result(ec[0])?;
-            if ts == 0.0 {
-                result.clear();
+            if buf.len() != self.channel_count {
+                buf.resize(self.channel_count, mapper(&[0 as u8; 0]));
             }
-            Ok((result, ts))
+            if ts != 0.0 {
+                for k in 0..ptrs.len() {
+                    let slice = std::slice::from_raw_parts(ptrs[k] as *const u8, lens[k] as usize);
+                    buf[k] = mapper(slice);
+                    lsl_destroy_string(ptrs[k]);
+                }
+            }
+            Ok(ts)
         }
     }
 
@@ -1455,7 +1525,7 @@ impl StreamInlet {
     * `mapper`: a function that converts a `&[u8]` to an owned copy of type `T`.
     * `timeout`: the timeout to pass to the native function
 
-    This can return an Error::StreamLost and potentially an Error::Internal.
+    This can return an `Error::StreamLost` and potentially an `Error::Internal`.
     */
     fn safe_pull_blob<T: Clone>(
         &self,
@@ -1465,6 +1535,8 @@ impl StreamInlet {
         let mut ec = [0 as i32];
         let mut ptrs = vec![0 as *mut ::std::os::raw::c_char; self.channel_count];
         let mut lens = vec![0 as u32; self.channel_count];
+        // we're not calling safe_pull_blob_buf here since that would am unnecessary allocations
+        // if there was no new data
         unsafe {
             let ts = lsl_pull_sample_buf(
                 self.handle,
@@ -1529,6 +1601,33 @@ pub trait Pullable<T> {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<T>, f64)>;
 
     /**
+    Pull the next successive sample from an inlet into a provided buffer.
+
+    Handles type checking & conversion. When using this function keep in mind that, if you do not
+    pick up values for a while or at a sufficiently fast rate, you will fall behind in the data
+    stream (up to a maximum of the inlet's `max_buflen` setting).
+
+    Arguments:
+    * `buf`: A mutable buffer into which this function will read the data; the buffer will be
+       resized (if necessary) to match the number of channels of the stream.
+    * `timeout`: The timeout for this operation, if any. If you use 0.0, the function will be
+       non-blocking. You can also use `lsl::FOREVER` to have no timeout.
+
+    Returns the capture time of the sample on the remote side (e.g., remote machine). If no new
+    sample was available, the returned timestamp will be 0.0, and the buffer will not be written to
+    (although it may be resized as needed) -- i.e., it will *not* return an `Error::Timeout` since
+    we consider this a normal behavior.
+
+    If you want to remap the time stamp to the local machine's clock, you can enable the clock
+    synchronization option on the inlet using the `set_postprocessing()` method. Alternatively that
+    can also be done manually by adding the return values of inlet's `time_correction()` method.
+
+    This can return an `Error::StreamLost` if the stream source has been lost (see also `recover`
+    option in inlet constructor for details).
+    */
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<T>, timeout: f64) -> Result<f64>;
+
+    /**
     Pull a chunk of new samples and their time stamps from the inlet.
 
     This will return *all* new samples that you have not yet picked up since your last call (i.e.,
@@ -1562,11 +1661,19 @@ impl Pullable<f32> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f32>, f64)> {
         self.safe_pull_numeric(lsl_pull_sample_f, timeout)
     }
+
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<f32>, timeout: f64) -> Result<f64> {
+        self.safe_pull_numeric_buf(lsl_pull_sample_f, buf, timeout)
+    }
 }
 
 impl Pullable<f64> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<f64>, f64)> {
         self.safe_pull_numeric(lsl_pull_sample_d, timeout)
+    }
+
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<f64>, timeout: f64) -> Result<f64> {
+        self.safe_pull_numeric_buf(lsl_pull_sample_d, buf, timeout)
     }
 }
 
@@ -1575,11 +1682,19 @@ impl Pullable<i64> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i64>, f64)> {
         self.safe_pull_numeric(lsl_pull_sample_l, timeout)
     }
+
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<i64>, timeout: f64) -> Result<f64> {
+        self.safe_pull_numeric_buf(lsl_pull_sample_l, buf, timeout)
+    }
 }
 
 impl Pullable<i32> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i32>, f64)> {
         self.safe_pull_numeric(lsl_pull_sample_i, timeout)
+    }
+
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<i32>, timeout: f64) -> Result<f64> {
+        self.safe_pull_numeric_buf(lsl_pull_sample_i, buf, timeout)
     }
 }
 
@@ -1587,11 +1702,19 @@ impl Pullable<i16> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i16>, f64)> {
         self.safe_pull_numeric(lsl_pull_sample_s, timeout)
     }
+
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<i16>, timeout: f64) -> Result<f64> {
+        self.safe_pull_numeric_buf(lsl_pull_sample_s, buf, timeout)
+    }
 }
 
 impl Pullable<i8> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<i8>, f64)> {
         self.safe_pull_numeric(lsl_pull_sample_c, timeout)
+    }
+
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<i8>, timeout: f64) -> Result<f64> {
+        self.safe_pull_numeric_buf(lsl_pull_sample_c, buf, timeout)
     }
 }
 
@@ -1599,11 +1722,19 @@ impl Pullable<String> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<String>, f64)> {
         self.safe_pull_blob(|x| String::from_utf8_lossy(x).into_owned(), timeout)
     }
+
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<String>, timeout: f64) -> Result<f64> {
+        self.safe_pull_blob_buf(|x| String::from_utf8_lossy(x).into_owned(), buf, timeout)
+    }
 }
 
 impl Pullable<vec::Vec<u8>> for StreamInlet {
     fn pull_sample(&self, timeout: f64) -> Result<(vec::Vec<vec::Vec<u8>>, f64)> {
         self.safe_pull_blob(|x| x.to_vec(), timeout)
+    }
+
+    fn pull_sample_buf(&self, buf: &mut vec::Vec<vec::Vec<u8>>, timeout: f64) -> Result<f64> {
+        self.safe_pull_blob_buf(|x| x.to_vec(), buf, timeout)
     }
 }
 
