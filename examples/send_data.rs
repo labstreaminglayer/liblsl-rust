@@ -1,5 +1,6 @@
 /** Example program that demonstrates how to send a multi-channel time series to LSL.
-This application pretends to stream data from a BioSemi (tm) EEG device into LSL. */
+This application pretends to stream data from a BioSemi (tm) EEG device into LSL. See also
+send_data_advanced.rs for more advanced use cases. */
 use lsl;
 use lsl::Pushable; // trait used by the outlet object
 use rand::Rng; // since we're sending random data

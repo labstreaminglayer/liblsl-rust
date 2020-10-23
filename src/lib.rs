@@ -5,11 +5,12 @@ The lab streaming layer is a peer-to-peer pub/sub system on the local network th
 real-time exchange of multi-channel time series (plus their meta-data) between applications and
 machines, with built-in cross-device time synchronization.
 
-The most common use case is in lab spaces to make, e.g., instrument data from a different pieces of
+The most common use case is in lab spaces to make, e.g., instrument data from different pieces of
 hardware (e.g., sensors) accessible in real time to client programs (e.g., experimentation scripts,
 recording programs, stream viewers, or live processing software). One of the main features of LSL
 is the uniform API that allows clients to read formatted multi-channel data from many device types
-(such as EEG, eye tracking, audio, human interface devices, events, etc.) with just a few lines of code.
+(such as EEG, eye tracking, audio, human interface devices, events, etc.) with the same few lines
+of code.
 
 The API covers two areas:
 - The "push API" (aka publish) allows to create stream outlets and to push data (regular or
@@ -791,10 +792,6 @@ Implemented by StreamOutlet.
 
 See also the `Pushable` trait for the simpler methods `push_sample<T>()` and `push_chunk<T>()`.
 
-Note: while these methods can technically fail, this is exceedingly rare and would only happen if
-arguments were malformed, in case of an OS error (e.g., out of memory) or a native library problem.
-The error variants would then be `Error::BadArgument` or `Error::Internal`.
-
 **Note:** If you push in data that as the wrong size (array length not matching the declared number
 of channels), these functions will trigger an assertion and panic.
 */
@@ -1485,7 +1482,7 @@ impl StreamInlet {
         let mut ec = [0 as i32];
         let mut ptrs = vec![0 as *mut ::std::os::raw::c_char; self.channel_count];
         let mut lens = vec![0 as u32; self.channel_count];
-        // we're not calling safe_pull_blob_buf here since that would am unnecessary allocations
+        // we're not calling safe_pull_blob_buf here since that would make unnecessary allocations
         // if there was no new data
         unsafe {
             let ts = lsl_pull_sample_buf(
@@ -1702,7 +1699,7 @@ validity of the current element.
 use of `XMLElement` cursors.
 
 **Panics:** any strings passed into this function must be valid UTF8-encoded strings and contain no
-intermittent zero bytes (otherwise this will trigger an assertion and panic).
+intermittent zero bytes (otherwise this will trigger an assertion).
 */
 #[derive(Clone, Debug)]
 pub struct XMLElement {
@@ -2210,9 +2207,9 @@ impl fmt::Display for Error {
 /// Since no further source information is available, this is omitted.
 impl std::error::Error for Error {}
 
-// Internal function that creates a CString from a well-formed utf8-encoded &str and panics if
-// the string contains inline zero bytes. This function *panics* if a null byte is contained in s,
-// therefore this should only be used in APIs that do not return error values.
+// Internal function that creates a CString from a well-formed utf8-encoded &str. This function
+// *panics* if a null byte is contained in s, therefore this should only be used in APIs that do
+// not return error values.
 fn make_cstring(s: &str) -> ffi::CString {
     // If you're getting this, you passed a string containing 0 bytes to the library. In the
     // context where it happened, this is a fatal error.

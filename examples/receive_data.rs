@@ -1,4 +1,5 @@
-/** Example program to show how to read a multi-channel time series from LSL. */
+/** Example program to show how to read a multi-channel time series from LSL. See also
+receive_data_advanced.rs for more advanced use cases.*/
 use lsl;
 use lsl::Pullable; // trait used by the inlet
 

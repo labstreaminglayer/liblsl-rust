@@ -1,7 +1,8 @@
-use ::std::*;
-/** Example program to show Some advanced capabilities when reading data.*/
+/** Example program that shows several advanced capabilities when reading data. */
 use lsl;
 use lsl::Pullable; // trait used by the inlet // for user input
+use std::io;
+use std::vec;
 
 fn main() -> Result<(), lsl::Error> {
     println!("Resolving EEG stream...");

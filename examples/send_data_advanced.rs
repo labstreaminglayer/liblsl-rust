@@ -27,7 +27,6 @@ fn main() -> Result<(), lsl::Error> {
             .append_child_value("type", "EEG");
     }
 
-
     // Next we create a stream outlet. This makes our stream visible on the network.
     // We can have the data transmitted in chunks to reduce network bandwidth, and here we use 20
     // samples per chunk, and the default max buffer size of 360 seconds.
@@ -36,7 +35,8 @@ fn main() -> Result<(), lsl::Error> {
     println!("Now streaming data...");
     let mut rng = rand::thread_rng();
     loop {
-        // make a new random 8-channel sample
+        // make a new random 8-channel sample (if we used a different value type here, then LSL
+        // will internally convert it to the type declared in the StreamInfo)
         let sample: Vec<f32> = (0..8).map(|_| rng.gen_range(-15.0, 15.0)).collect();
         // This is what you can do if you knew that your data was on average 53ms old by the time
         // you submitted it to LSL (e.g., due to driver delays): you back-date the timestamp
@@ -47,8 +47,8 @@ fn main() -> Result<(), lsl::Error> {
         outlet.push_sample_ex(&sample, stamp, true)?;
         // wait a bit until we send the next sample
         // note that, in practice, your actual samples per second isn't going to be exactly what
-        // you declared in the stream info -- that's why that declaration above is considered the
-        // "nominal" sampling rate as opposed to the *effective* sampling rate of the data
+        // you declared in the stream info -- that's why that info calls it the "nominal" sampling
+        // rate, as opposed to the *effective* sampling rate of the data
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
