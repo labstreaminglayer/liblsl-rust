@@ -2,7 +2,7 @@ use std::env;
 
 fn main() {
     // TODO: find out if liblsl already present on system and usable (if so, link to that instead)
-    println!("cargo:warning={}", "rebuilding...");
+    // println!("cargo:warning={}", "rebuilding...");
     build_liblsl();
 }
 

@@ -10,15 +10,5 @@ keywords = ["lsl", "ffi"]
 categories = ["external-ffi-bindings"]
 links = "lsl"
 
-[dependencies]
-
-
 [build-dependencies]
 cmake = "0.1.44"
-
-
-[features]
-default = []
-
-# enable this feature if you want to force a statically linked liblsl (built from source)
-force-static = []

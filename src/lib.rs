@@ -1,16 +1,15 @@
 /*!
 Rust API for the [Lab Streaming Layer](https://github.com/sccn/labstreaminglayer) (LSL).
 
-The lab streaming layer is a pub/sub system that allows for real-time exchange of multi-channel
-time series (plus arbitrary meta-data) between applications and machines on a local network (or in
-a multicast group) with time synchronization. LSL is peer-to-peer and implements service discovery
-to allow streams to be discoverable on the network.
+The lab streaming layer is a peer-to-peer pub/sub system on the local network that allows for
+real-time exchange of multi-channel time series (plus their meta-data) between applications and
+machines, with built-in cross-device time synchronization.
 
-The typical use case is in lab spaces to make, e.g., instrument data from a variety of devices
-aaccessible in real time to client programs (e.g., experimentation scripts, recording programs,
-stream viewers, or live processing software). Since LSL provides a simple uniform API, one few-line
-client can receive data from devices across many device types and suppliers/vendors (such as EEG,
-eye tracking, audio, human input devices, events, etc).
+The most common use case is in lab spaces to make, e.g., instrument data from a different pieces of
+hardware (e.g., sensors) accessible in real time to client programs (e.g., experimentation scripts,
+recording programs, stream viewers, or live processing software). One of the main features of LSL
+is the uniform API that allows clients to read formatted multi-channel data from many device types
+(such as EEG, eye tracking, audio, human interface devices, events, etc.) with just a few lines of code.
 
 The API covers two areas:
 - The "push API" (aka publish) allows to create stream outlets and to push data (regular or
