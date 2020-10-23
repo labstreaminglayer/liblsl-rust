@@ -102,6 +102,10 @@ tested with this crate so far:
 * x86_64-apple-darwin
 ```
 
+## API Documentation
+
+Doocumentation for the most recent release can be found at [docs.rs](https://docs.rs/lsl).
+
 #### The [lsl-sys](https://crates.io/crates/lsl-sys) crate
 
 The `lsl` crate depends on a lower-level `lsl-sys` crate that provides the raw (unsafe) native 
