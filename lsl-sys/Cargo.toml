@@ -1,10 +1,10 @@
 [package]
 name = "lsl-sys"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Intheon <contact@intheon.io>", "Christian Kothe <christian.kothe@intheon.io>"]
 edition = "2018"
 description = "Low-level bindings to the system liblsl library (lab streaming layer)."
-repository = "https://github.com/intheon/liblsl-rust"
+repository = "https://github.com/labstreaminglayer/liblsl-rust"
 license = "MIT"
 keywords = ["lsl", "ffi"]
 categories = ["external-ffi-bindings"]

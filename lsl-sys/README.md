@@ -6,12 +6,12 @@ You probably don't want to use this library directly; instead, check out the hig
 ### Getting the source code
 
 ```
-git clone --recurse-submodules https://github.com/intheon/liblsl-rust
+git clone --recurse-submodules https://github.com/labstreaminglayer/liblsl-rust
 ``` 
 
 ### Compiling
 
-See documentation in the [liblsl-rust](https://github.com/intheon/liblsl-rust) repository for 
+See documentation in the [liblsl-rust](https://github.com/labstreaminglayer/liblsl-rust) repository for 
 build instructions. 
 
 ### Regenerating C FFI bindings
