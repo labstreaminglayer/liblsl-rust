@@ -16,7 +16,7 @@ fn main() -> Result<(), lsl::Error> {
     // Next we're creating an inlet to read from it. Let's say this is a real-time processing tool,
     // and we have no use for more than 10 seconds of data backlog accumulating in case our program
     // stalls for a while, so we set the max buffer length to 10s. We'll also ask that the data be
-    // transmitted in chunks of 20 samples at a time, e.g., to save network bandwidth.
+    // transmitted in chunks of 8 samples at a time, e.g., to save network bandwidth.
     let inl = lsl::StreamInlet::new(&res[0], 10, 8, true)?;
 
     // now that we have the inlet we can use it to retrieve the full StreamInfo object from it
@@ -32,7 +32,7 @@ fn main() -> Result<(), lsl::Error> {
         print!("  {}", cursor.child_value_named("label"));
         cursor = cursor.next_sibling();
     }
-    // ... alternatively we could get an XML string and parse it using some other crate
+    // ... alternatively we could get an XML string and parse it using some other tool
     println!("\n\nThe StreamInfo's full XML dump is: {}", info.to_xml()?);
 
     println!("Press [Enter] to continue");

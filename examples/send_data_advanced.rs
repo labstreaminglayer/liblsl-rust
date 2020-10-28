@@ -41,9 +41,8 @@ fn main() -> Result<(), lsl::Error> {
         // This is what you can do if you knew that your data was on average 53ms old by the time
         // you submitted it to LSL (e.g., due to driver delays): you back-date the timestamp
         let stamp = lsl::local_clock() - 0.053;
-        // now let's send it with that stamp (pushthrough is overridden by our chunk_size on the outlet)
-        // note that you can submit data of a type that differs from what's declared as the channel
-        // format (it will be converted into what's declared as the channel format)
+        // now let's send it with that stamp (the pushthrough flag (last argument) is overridden
+        // by the chunk_size value that we declared on the outlet)
         outlet.push_sample_ex(&sample, stamp, true)?;
         // wait a bit until we send the next sample
         // note that, in practice, your actual samples per second isn't going to be exactly what
