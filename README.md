@@ -76,6 +76,8 @@ use lsl;
 ```
 
 ## Getting the source code
+You don't need to clone this repo to use this crate, **but** you may still need the right C/C++ system compiler as discussed
+in the below section on compiling so that cargo can build the native library for you.
 
 ```
 git clone --recurse-submodules https://github.com/labstreaminglayer/liblsl-rust
